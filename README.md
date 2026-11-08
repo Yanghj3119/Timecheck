@@ -48,4 +48,4 @@ Supabase에 실행할 SQL 파일은 [`supabase/schema.sql`](supabase/schema.sql)
 2. `supabase/schema.sql` 파일 전체를 복사해 붙여넣고 **Run**을 누릅니다.
 3. `study_sessions`, `travel_routes`, `study_courses` 테이블과 로그인 사용자별 RLS 정책이 만들어집니다.
 
-SQL을 실행해도 앱과 Supabase 간 로그인·동기화는 아직 연결되지 않습니다. 현재 공부와 이동 기록은 브라우저에 저장됩니다. 연동할 때는 Supabase 프로젝트 URL과 공개 anon 키를 사용하고, service role 키는 브라우저에 넣지 마세요.
+SQL을 실행해도 앱과 Supabase 간 로그인·동기화는 아직 연결되지 않습니다. 현재 공부와 이동 기록은 브라우저에 저장됩니다. 나중에 연동할 때 Vercel 환경변수 이름은 `VITE_SUPABASE_URL`과 `VITE_SUPABASE_PUBLISHABLE_KEY`를 사용하면 됩니다. Supabase 최신 React 안내가 publishable key 사용을 권장합니다. `service_role` 또는 secret key는 브라우저에 넣지 마세요.
