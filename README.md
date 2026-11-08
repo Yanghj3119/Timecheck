@@ -38,8 +38,14 @@ GitHub 저장소: https://github.com/Yanghj3119/Timecheck
 
 ## GitHub와 Vercel 배포
 
-저장소에 이 폴더의 파일을 올린 다음 Vercel에서 저장소를 가져오면 됩니다. Framework Preset은 Vite, Build Command는 `npm run build`, Output Directory는 `dist`로 설정합니다. 이 초기 버전은 Supabase 키 없이도 사용할 수 있습니다.
+Vercel에서 `Yanghj3119/Timecheck` 저장소를 가져오면 됩니다. Framework Preset은 Vite, Build Command는 `pnpm run build`, Output Directory는 `dist`로 설정합니다. 이 초기 버전은 Supabase 키 없이도 사용할 수 있습니다.
 
 ## Supabase 확장
 
-현재 브라우저 간 동기화와 로그인은 아직 연결되지 않았습니다. Supabase 프로젝트를 연결할 때 사용할 SQL은 `supabase/schema.sql`에 있습니다. 사용자 인증과 사용자별 데이터 접근 정책을 먼저 적용한 다음, 프로젝트 URL과 공개 anon 키를 환경 변수로 연결하면 여러 기기 간 동기화를 추가할 수 있습니다. 서비스 역할 키는 브라우저에 넣지 마세요.
+Supabase에 실행할 SQL 파일은 [`supabase/schema.sql`](supabase/schema.sql)입니다.
+
+1. Supabase 대시보드에서 프로젝트를 열고 **SQL Editor → New query**를 선택합니다.
+2. `supabase/schema.sql` 파일 전체를 복사해 붙여넣고 **Run**을 누릅니다.
+3. `study_sessions`, `travel_routes`, `study_courses` 테이블과 로그인 사용자별 RLS 정책이 만들어집니다.
+
+SQL을 실행해도 앱과 Supabase 간 로그인·동기화는 아직 연결되지 않습니다. 현재 공부와 이동 기록은 브라우저에 저장됩니다. 연동할 때는 Supabase 프로젝트 URL과 공개 anon 키를 사용하고, service role 키는 브라우저에 넣지 마세요.
