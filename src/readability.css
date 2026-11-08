@@ -86,6 +86,8 @@ body { font-size: 14px; line-height: 1.55; }
 .connection-form input { width: 100%; padding: 11px 12px; border: 1px solid #dfe2db; border-radius: 8px; background: #fff; color: #30352e; font-size: 14px; }
 .connection-form .primary-button { justify-content: center; min-height: 42px; font-size: 13px; }
 .connection-form .primary-button:disabled { opacity: .65; }
+.auth-mode-links { display: flex; flex-wrap: wrap; gap: 8px 16px; }
+.auth-mode-links button { padding: 0; border: 0; background: none; color: #526f5c; font-size: 12px; text-decoration: underline; text-underline-offset: 3px; }
 .auth-message { margin: 12px 0 0; padding: 10px 12px; border-radius: 8px; background: #f2f5f1; color: #495a4a; font-size: 12px; line-height: 1.55; overflow-wrap: anywhere; }
 .course-group-head b { font-size: 14px; }
 .course-group-head small { font-size: 11px; color: #555b53; }
@@ -182,6 +184,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   .connection-status { font-size: 10px; }
   .connection-copy, .connection-account, .connection-form { font-size: 12px; }
   .connection-form .primary-button { width: 100%; }
+  .auth-mode-links { gap: 10px 14px; }
 }
 
 @media (max-width: 380px) {

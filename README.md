@@ -59,8 +59,10 @@ VITE_SUPABASE_PUBLISHABLE_KEY
 
 값은 Supabase Project URL과 Publishable key입니다. 브라우저 앱에는 publishable key만 사용하고 `service_role`이나 secret key는 넣지 마세요.
 
-앱의 **설정 → 기기 간 기록 동기화**에서 등록된 이메일을 입력해 로그인 메일을 받습니다. Supabase **Authentication → URL Configuration**의 Redirect URLs에 실제 배포 주소 `https://timecheck-1ztj.vercel.app/**`를 추가하고 Site URL은 `https://timecheck-1ztj.vercel.app`으로 설정하세요. 로컬 개발도 쓴다면 `http://localhost:5173/**`도 허용 목록에 추가합니다. 기본 `{{ .ConfirmationURL }}` 링크를 눌러 로그인하거나, 이메일 템플릿에서 `{{ .Token }}` 인증번호를 쓰면 앱에 번호를 입력해 로그인할 수 있습니다. 앱은 두 콜백 방식을 처리하고 오류가 있으면 설정 화면에 표시합니다.
+앱의 **설정 → 기기 간 기록 동기화**에서 **새 계정 만들기**를 선택한 뒤 이메일과 비밀번호(8자 이상)를 입력합니다. 이메일 확인이 켜져 있으면 받은 확인 링크를 열어 가입을 마칩니다. 이후에는 이메일과 비밀번호로 로그인합니다. 비밀번호를 잊으면 **비밀번호 잊어버렸어**에서 재설정 메일을 요청할 수 있습니다.
 
-로그인 링크를 열어도 상태가 바뀌지 않으면 메일 앱이 링크를 다른 브라우저에서 열었는지 확인하세요. 로그인한 브라우저와 공부 기록을 확인할 브라우저가 다르면 세션이 공유되지 않습니다. 링크를 요청한 앱과 같은 브라우저에서 열고, 허용 주소가 해당 배포 주소와 정확히 일치하는지 확인하세요.
+Supabase **Authentication → URL Configuration**의 Redirect URLs에 실제 배포 주소 `https://timecheck-1ztj.vercel.app/**`를 추가하고 Site URL은 `https://timecheck-1ztj.vercel.app`으로 설정하세요. 로컬 개발도 쓴다면 `http://localhost:5173/**`도 허용 목록에 추가합니다. 이메일 확인 및 비밀번호 재설정 링크는 등록된 주소로 돌아옵니다.
+
+Supabase 기본 이메일 발송기는 프로젝트당 시간당 2통으로 제한되며, 비밀번호 가입 확인과 재설정 메일도 이 제한에 포함됩니다. 한도 오류가 나면 한도가 풀릴 때까지 기다리거나 Custom SMTP를 설정하세요.
 
 처음 로그인하면 현재 브라우저의 공부 기록·강의 진도·이동 경로를 계정에 합쳐 저장하고, 이후 기록은 Supabase와 동기화됩니다. 다른 기기에서도 같은 이메일로 로그인하면 기록을 불러옵니다. 로그인하지 않았거나 환경변수가 없으면 브라우저 저장 방식으로 계속 사용할 수 있습니다.

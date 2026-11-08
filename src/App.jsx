@@ -66,6 +66,17 @@ function buildLecturePlan(courses) {
   return days;
 }
 
+function friendlyAuthError(error) {
+  const message = error?.message || String(error);
+  if (error?.code === 'over_email_send_rate_limit' || /email rate limit exceeded/i.test(message)) {
+    return 'Supabase 기본 이메일 발송 한도(프로젝트당 시간당 2통)를 넘었어. 한 시간 정도 기다린 뒤 다시 시도하거나 Custom SMTP를 설정해줘.';
+  }
+  if (error?.code === 'over_request_rate_limit') {
+    return '짧은 시간에 요청이 많았어. 몇 분 뒤 다시 시도해줘.';
+  }
+  return message;
+}
+
 function App() {
   const [data, setData] = useState(() => {
     const initial = addLocalIds(load());
@@ -80,8 +91,9 @@ function App() {
   const [toast, setToast] = useState('');
   const [authUser, setAuthUser] = useState(null);
   const [authEmail, setAuthEmail] = useState('');
-  const [authOtp, setAuthOtp] = useState('');
-  const [otpSent, setOtpSent] = useState(false);
+  const [authPassword, setAuthPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [authMode, setAuthMode] = useState('login');
   const [authMessage, setAuthMessage] = useState('');
   const [authBusy, setAuthBusy] = useState(false);
   const [syncReady, setSyncReady] = useState(false);
@@ -105,8 +117,9 @@ function App() {
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (active) setAuthUser(session?.user ?? null);
     });
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
       if (active) setAuthUser(session?.user ?? null);
+      if (active && event === 'PASSWORD_RECOVERY') { setAuthMode('set-password'); setTab('설정'); }
     });
     return () => { active = false; subscription.unsubscribe(); };
   }, []);
@@ -129,6 +142,7 @@ function App() {
     setAuthMessage('이메일 링크를 확인하고 있어…');
     setTab('설정');
     const type = currentUrl.searchParams.get('type') || 'email';
+    if (type === 'recovery') setAuthMode('set-password');
     supabase.auth.verifyOtp({ token_hash: tokenHash, type })
       .then(({ data: result, error }) => {
         window.history.replaceState({}, document.title, currentUrl.pathname);
@@ -167,42 +181,57 @@ function App() {
     return () => { active = false; };
   }, [authUser?.id]);
 
-  const sendSignInLink = async (event) => {
+  const signInWithPassword = async (event) => {
+    event.preventDefault();
+    if (!supabase) return;
+    setAuthBusy(true); setAuthMessage('');
+    try {
+      const { data: result, error } = await supabase.auth.signInWithPassword({ email: authEmail.trim(), password: authPassword });
+      if (error) setAuthMessage(`로그인하지 못했어: ${friendlyAuthError(error)}`);
+      else if (result.user) { setAuthUser(result.user); setAuthMessage('로그인됐어. 기록을 불러오는 중이야.'); }
+    } catch (error) {
+      setAuthMessage(`로그인하지 못했어: ${friendlyAuthError(error)}`);
+    } finally { setAuthBusy(false); }
+  };
+  const signUpWithPassword = async (event) => {
+    event.preventDefault();
+    if (!supabase) return;
+    if (authPassword.length < 8) { setAuthMessage('비밀번호는 8자 이상으로 입력해줘.'); return; }
+    if (authPassword !== confirmPassword) { setAuthMessage('비밀번호가 서로 달라. 다시 확인해줘.'); return; }
+    setAuthBusy(true); setAuthMessage('');
+    try {
+      const { data: result, error } = await supabase.auth.signUp({ email: authEmail.trim(), password: authPassword, options: { emailRedirectTo: window.location.origin } });
+      if (error) setAuthMessage(`가입하지 못했어: ${friendlyAuthError(error)}`);
+      else if (result.session && result.user) { setAuthUser(result.user); setAuthMessage('가입과 로그인이 완료됐어.'); }
+      else setAuthMessage('가입 요청을 보냈어. 이메일 확인 링크를 눌러 가입을 마쳐줘.');
+    } catch (error) {
+      setAuthMessage(`가입하지 못했어: ${friendlyAuthError(error)}`);
+    } finally { setAuthBusy(false); }
+  };
+  const sendPasswordReset = async (event) => {
     event.preventDefault();
     if (!supabase || !authEmail.trim()) return;
-    setAuthBusy(true); setAuthMessage(''); setAuthOtp('');
+    setAuthBusy(true); setAuthMessage('');
     try {
-      const { error } = await supabase.auth.signInWithOtp({ email: authEmail.trim(), options: { emailRedirectTo: window.location.origin, shouldCreateUser: false } });
-      if (error) {
-        setOtpSent(false);
-        setAuthMessage(`로그인 메일을 보내지 못했어: ${error.message}`);
-      } else {
-        setOtpSent(true);
-        setAuthMessage('메일을 확인해줘. 인증번호가 있으면 아래에 입력하고, 로그인 링크가 있으면 눌러도 돼.');
-      }
+      const { error } = await supabase.auth.resetPasswordForEmail(authEmail.trim(), { redirectTo: window.location.origin });
+      setAuthMessage(error ? `재설정 메일을 보내지 못했어: ${friendlyAuthError(error)}` : '비밀번호 재설정 메일을 보냈어. 메일의 링크를 열어 새 비밀번호를 설정해줘.');
     } catch (error) {
-      setAuthMessage(`로그인 링크를 보내지 못했어: ${error.message}`);
-    } finally {
-      setAuthBusy(false);
-    }
+      setAuthMessage(`재설정 메일을 보내지 못했어: ${friendlyAuthError(error)}`);
+    } finally { setAuthBusy(false); }
   };
-  const verifyEmailOtp = async (event) => {
+  const updatePassword = async (event) => {
     event.preventDefault();
-    if (!supabase || !authEmail.trim() || !authOtp.trim()) return;
-    setAuthBusy(true); setAuthMessage('인증번호를 확인하고 있어…');
+    if (!supabase) return;
+    if (authPassword.length < 8) { setAuthMessage('비밀번호는 8자 이상으로 입력해줘.'); return; }
+    if (authPassword !== confirmPassword) { setAuthMessage('비밀번호가 서로 달라. 다시 확인해줘.'); return; }
+    setAuthBusy(true); setAuthMessage('');
     try {
-      const { data: result, error } = await supabase.auth.verifyOtp({ email: authEmail.trim(), token: authOtp.trim(), type: 'email' });
-      if (error) {
-        setAuthMessage(`인증번호가 맞지 않거나 만료됐어: ${error.message}`);
-      } else {
-        if (result.user) setAuthUser(result.user);
-        setAuthMessage('로그인됐어. 계정 기록을 불러오는 중이야.');
-      }
+      const { error } = await supabase.auth.updateUser({ password: authPassword });
+      if (error) setAuthMessage(`비밀번호를 바꾸지 못했어: ${friendlyAuthError(error)}`);
+      else { setAuthMode('login'); setAuthPassword(''); setConfirmPassword(''); setAuthMessage('비밀번호를 설정했어. 이제 이메일과 비밀번호로 로그인하면 돼.'); }
     } catch (error) {
-      setAuthMessage(`로그인에 실패했어: ${error.message}`);
-    } finally {
-      setAuthBusy(false);
-    }
+      setAuthMessage(`비밀번호를 바꾸지 못했어: ${friendlyAuthError(error)}`);
+    } finally { setAuthBusy(false); }
   };
   const signOut = async () => { await supabase?.auth.signOut(); setAuthMessage('로그아웃했어. 기록은 이 기기에 남아 있어.'); };
   const sessionsToday = data.sessions.filter((s) => s.date === todayKey());
@@ -236,7 +265,7 @@ function App() {
       {tab === '공부 기록' && <><div className="page-title page-title-row"><div><div className="eyebrow">STUDY LOG</div><h1>공부 기록</h1><p>강의 시청과 복습·문제풀이 시간을 구분해 기록해요.</p></div><button className="primary-button" onClick={()=>setModal('session')}><Plus size={17}/> 기록 추가</button></div><div className="record-summary"><div><span>이번 주 순공부</span><b>{fmt(weekMinutes)}</b></div><div><span>기록 횟수</span><b>{weekSessions.length}회</b></div><div><span>이번 주 목표</span><b>{weekTargetHours}시간</b></div></div><div className="panel logs-panel"><div className="panel-heading"><div><div className="eyebrow">THIS WEEK</div><h2>기록 목록</h2></div><span className="record-count">{weekSessions.length}개 기록</span></div>{weekSessions.length ? <div className="record-list full-record-list">{weekSessions.map(s=><RecordRow key={s.at} item={s} onDelete={removeSession}/>)}</div>:<div className="empty-state"><div className="empty-icon"><BookOpen size={20}/></div><b>아직 기록이 없어요</b><span>첫 공부 기록을 추가해 보세요.</span></div>}</div></>}
       {tab === '인강 진도' && <><div className="page-title page-title-row"><div><div className="eyebrow">LECTURE TRACKER</div><h1>인강 진도</h1><p>강의 1개는 약 1시간으로 기록해요. 완료 버튼을 누르면 진도와 공부 기록이 함께 업데이트됩니다.</p></div><div className="lecture-total"><b>{courseCompleted}<small> / {courseTotal}강</small></b><span>{courseTotal-courseCompleted}강 남음 · 약 {courseTotal-courseCompleted}시간</span></div></div><section className="panel lecture-plan-panel"><div className="lecture-plan-head"><div><div className="eyebrow">NOV 9 – DEC 8</div><h2>30일 완강 일정</h2><p>남은 {courseTotal-courseCompleted}강 · 하루 평균 {Math.floor((courseTotal-courseCompleted)/30)}시간 {Math.round((courseTotal-courseCompleted)%30*60/30)}분. 근무 시간을 제외하고 배분했어.</p></div><span className="lecture-plan-total">강의만 하루 10–11시간</span></div><div className="lecture-plan-list">{lecturePlan.map(day=>{const key=dateKey(day.date);return <article className="lecture-plan-day" key={key}><div className="lecture-plan-date"><b>{new Intl.DateTimeFormat('ko-KR',{month:'numeric',day:'numeric',weekday:'short'}).format(day.date)}</b><span>{day.goal}강 <i>· 약 {day.goal}시간</i></span></div><div className="lecture-plan-tasks">{day.tasks.map(({course,count})=><span key={course.id}><b>{course.subject}</b>{course.title.replace(/^\[\d+\]\s*/, '')} · {count}강</span>)}</div>{(key==='2026-11-09'||key==='2026-11-20'||(day.date.getDay()>=1&&day.date.getDay()<=3))&&<div className="lecture-plan-work"><BriefcaseBusiness size={14}/>{key==='2026-11-09'?'추가 근무 16:00–20:00 · 정기 근무 20:00–24:00':key==='2026-11-20'?'추가 근무 16:00–20:00':'정기 근무 20:00–24:00'}</div>}</article>})}</div><p className="lecture-plan-note">강의 시간은 1강당 약 1시간으로 계산했어. 이 일정은 강의 시청만 포함하고 복습·문제풀이 시간은 따로 더해야 해.</p></section><div className="course-subject-tabs"><span>전체 강의 {data.courses.length}개</span><span>남은 수강 시간 약 {courseTotal-courseCompleted}시간</span></div>{subjects.filter(s=>data.courses.some(c=>c.subject===s)).map((subject,index)=><section className="panel course-group" key={subject}><div className="course-group-head"><span className={`subject-icon color-${subjects.indexOf(subject)}`}>{['영어','국어','행정법','행정학','한국사'].indexOf(subject)===0?'A':subject.slice(0,1)}</span><div><b>{subject}</b><small>{data.courses.filter(c=>c.subject===subject).reduce((a,c)=>a+c.completed,0)} / {data.courses.filter(c=>c.subject===subject).reduce((a,c)=>a+c.total,0)}강 수강</small></div></div>{data.courses.filter(c=>c.subject===subject).map(course=>{const pct=Math.round(course.completed/course.total*100);return <div className="course-row" key={course.id}><div className="course-info"><div className="course-name"><b>{course.title}</b>{course.completed===course.total&&<span className="complete-tag">완강</span>}</div><div className="course-progress"><i style={{width:`${pct}%`}}/></div></div><div className="course-count"><b>{course.total}강</b><small>{course.completed}강 수강</small></div><div className="course-actions"><button className="lecture-complete" disabled={course.completed>=course.total} onClick={()=>completeLecture(course)}><Plus size={14}/> 1강 완료</button></div></div>})}</section>)}</>}
       {tab === '통계' && <><div className="page-title"><div className="eyebrow">YOUR PROGRESS</div><h1>학습 통계</h1><p>시간보다 중요한 건 꾸준히 쌓이는 실력이에요.</p></div><div className="analytics-top"><div className="panel analytic-total"><div className="eyebrow">THIS WEEK STUDY TIME</div><b>{fmt(weekMinutes)}</b><span>목표 {weekTargetHours}시간 중 {Math.round((weekTargetMinutes ? weekMinutes/weekTargetMinutes*100 : 0))}% 달성</span><div className="progress"><i style={{width:`${Math.min((weekTargetMinutes ? weekMinutes/weekTargetMinutes*100 : 0),100)}%`}}/></div></div><div className="panel analytic-total soft"><div className="eyebrow">STUDY SESSIONS</div><b>{weekSessions.length}<small>회</small></b><span>이번 주 학습 기록 횟수</span><div className="spark-bars">{weekDates.map((d,i)=>{const m=weekSessions.filter(s=>s.date===dateKey(d)).reduce((a,s)=>a+Number(s.minutes),0);return <i key={i} style={{height:`${Math.max(m/540*100,6)}%`}} title={`${weekdays[i]} ${fmt(m)}`}/>})}</div></div></div><div className="panel analytics-panel"><div className="panel-heading"><div><div className="eyebrow">BY SUBJECT</div><h2>과목별 공부 시간</h2></div></div><div className="analytics-subjects">{subjects.map((s,i)=>{const mins=weekSessions.filter(x=>x.subject===s).reduce((a,x)=>a+Number(x.minutes),0);return <div className="analytics-subject" key={s}><div><span className={`subject-icon color-${i}`}>{['A','국','법','행','한'][i]}</span><b>{s}</b><strong>{fmt(mins)}</strong></div><div className="large-bar"><i style={{width:`${Math.min(weekMinutes?mins/weekMinutes*100:0,100)}%`}}/></div></div>})}</div></div></>}
-      {tab === '설정' && <><div className="page-title"><div className="eyebrow">PREFERENCES</div><h1>설정</h1><p>나의 수험 계획과 데이터를 관리해.</p></div><section className="panel connection-panel"><div className="panel-heading"><div><div className="eyebrow">SUPABASE</div><h2>기기 간 기록 동기화</h2></div><span className={`connection-status ${syncStatus}`}>{syncStatus==='synced'?'연결됨':syncStatus==='syncing'?'동기화 중':syncStatus==='error'?'확인 필요':supabaseConfigured?'로그인 전':'설정 필요'}</span></div>{!supabaseConfigured?<div className="connection-copy"><p>Vercel 프로젝트 환경변수에 아래 두 항목을 추가하고 새 배포를 만들어줘.</p><code>VITE_SUPABASE_URL</code><code>VITE_SUPABASE_PUBLISHABLE_KEY</code><small>Supabase 프로젝트 URL과 Publishable key를 사용해. Secret 또는 service_role 키는 넣지 마.</small></div>:authUser?<div className="connection-account"><p><b>{authUser.email}</b> 계정으로 기록을 동기화하고 있어.</p><p>현재 상태: {syncStatus==='synced'?'모든 기록이 저장됐어.':syncStatus==='syncing'?'기록을 저장하는 중이야.':syncStatus==='error'?'동기화 오류가 있어. SQL 적용과 네트워크를 확인해줘.':'연결을 준비 중이야.'}</p><button className="export-button" onClick={signOut}><LogOut size={15}/> 로그아웃</button></div>:<div className="connection-form"><p>등록한 이메일을 입력하면 로그인 메일을 보내줄게. 메일에 인증번호가 있으면 입력하고, 로그인 링크가 있으면 눌러도 돼.</p><form onSubmit={sendSignInLink}><label>이메일 주소<input type="email" required autoComplete="email" placeholder="name@example.com" value={authEmail} onChange={event=>setAuthEmail(event.target.value)}/></label><button className="primary-button" type="submit" disabled={authBusy}>{authBusy?(otpSent?'다시 보내는 중':'메일 보내는 중'):(otpSent?'로그인 메일 다시 받기':'로그인 메일 받기')}</button></form>{otpSent&&<form onSubmit={verifyEmailOtp}><label>이메일 인증번호<input type="text" required inputMode="numeric" autoComplete="one-time-code" maxLength={8} placeholder="메일에 온 숫자 입력" value={authOtp} onChange={event=>setAuthOtp(event.target.value.replace(/\D/g,'').slice(0,8))}/></label><button className="primary-button" type="submit" disabled={authBusy}>{authBusy?'확인 중':'인증번호로 로그인'}</button></form>}</div>}{authMessage&&<p className="auth-message" role="status">{authMessage}</p>}</section><div className="panel settings-panel"><div className="setting-row"><div className="setting-icon"><Target size={18}/></div><div><b>목표 시험</b><small>2027 제주 지방직 9급 일반행정</small></div><span className="setting-value">2027년</span></div><div className="setting-row"><div className="setting-icon"><Clock3 size={18}/></div><div><b>주간 순공 목표</b><small>월 6 · 화 6 · 수 6 · 목 9 · 금 9 · 토 9 · 일 5시간</small></div><span className="setting-value">50시간</span></div><div className="setting-row"><div className="setting-icon"><BriefcaseBusiness size={18}/></div><div><b>근무 일정</b><small>월–수 20:00–24:00 · 11/9 추가 16:00–20:00 · 11/20 추가 16:00–20:00</small></div><span className="setting-value">11월</span></div><div className="setting-row"><div className="setting-icon"><MapPin size={18}/></div><div><b>이동 시간</b><small>순공부 시간과 분리해서 관리</small></div><span className="setting-value">{data.trips.length}개 경로</span></div></div><div className="panel settings-panel"><div className="panel-heading"><div><div className="eyebrow">DATA</div><h2>내 기록</h2></div></div><p className="settings-copy">현재 기록은 이 브라우저에 자동 저장돼. 다른 기기에서도 쓰려면 Supabase 연결이 필요해.</p><button className="export-button" onClick={()=>{const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='합격기록장-백업.json';a.click();URL.revokeObjectURL(a.href);}}>기록 백업 다운로드 <ArrowRight size={15}/></button></div></>}
+      {tab === '설정' && <><div className="page-title"><div className="eyebrow">PREFERENCES</div><h1>설정</h1><p>나의 수험 계획과 데이터를 관리해.</p></div><section className="panel connection-panel"><div className="panel-heading"><div><div className="eyebrow">SUPABASE</div><h2>기기 간 기록 동기화</h2></div><span className={`connection-status ${syncStatus}`}>{syncStatus==='synced'?'연결됨':syncStatus==='syncing'?'동기화 중':syncStatus==='error'?'확인 필요':supabaseConfigured?'로그인 전':'설정 필요'}</span></div>{!supabaseConfigured?<div className="connection-copy"><p>Vercel 프로젝트 환경변수에 아래 두 항목을 추가하고 새 배포를 만들어줘.</p><code>VITE_SUPABASE_URL</code><code>VITE_SUPABASE_PUBLISHABLE_KEY</code><small>Supabase 프로젝트 URL과 Publishable key를 사용해. Secret 또는 service_role 키는 넣지 마.</small></div>:authUser&&authMode==='set-password'?<form className="connection-form" onSubmit={updatePassword}><p>새 비밀번호를 정해줘. 이메일 링크 인증이 완료된 계정에 적용돼.</p><label>새 비밀번호<input type="password" required minLength={8} autoComplete="new-password" value={authPassword} onChange={event=>setAuthPassword(event.target.value)}/></label><label>새 비밀번호 확인<input type="password" required minLength={8} autoComplete="new-password" value={confirmPassword} onChange={event=>setConfirmPassword(event.target.value)}/></label><button className="primary-button" type="submit" disabled={authBusy}>{authBusy?'저장 중':'비밀번호 저장'}</button></form>:authUser?<div className="connection-account"><p><b>{authUser.email}</b> 계정으로 기록을 동기화하고 있어.</p><p>현재 상태: {syncStatus==='synced'?'모든 기록이 저장됐어.':syncStatus==='syncing'?'기록을 저장하는 중이야.':syncStatus==='error'?'동기화 오류가 있어. SQL 적용과 네트워크를 확인해줘.':'연결을 준비 중이야.'}</p><button className="export-button" onClick={signOut}><LogOut size={15}/> 로그아웃</button></div>:<div className="connection-form"><p>{authMode==='signup'?'이메일과 비밀번호로 계정을 만들자. 이메일 확인이 켜져 있으면 확인 메일 링크를 눌러야 가입이 완료돼.':authMode==='reset'?'가입한 이메일을 입력하면 비밀번호 재설정 링크를 보내줄게.':'가입한 이메일과 비밀번호를 입력해 로그인해.'}</p><form onSubmit={authMode==='signup'?signUpWithPassword:authMode==='reset'?sendPasswordReset:signInWithPassword}><label>이메일 주소<input type="email" required autoComplete="email" placeholder="name@example.com" value={authEmail} onChange={event=>setAuthEmail(event.target.value)}/></label>{authMode!=='reset'&&<label>비밀번호<input type="password" required minLength={authMode==='signup'?8:1} autoComplete={authMode==='signup'?'new-password':'current-password'} value={authPassword} onChange={event=>setAuthPassword(event.target.value)}/></label>}{authMode==='signup'&&<label>비밀번호 확인<input type="password" required minLength={8} autoComplete="new-password" value={confirmPassword} onChange={event=>setConfirmPassword(event.target.value)}/></label>}<button className="primary-button" type="submit" disabled={authBusy}>{authBusy?'잠시만…':authMode==='signup'?'가입하기':authMode==='reset'?'재설정 메일 받기':'로그인'}</button></form><div className="auth-mode-links">{authMode==='login'?<><button type="button" onClick={()=>{setAuthMode('signup');setAuthMessage('');}}>새 계정 만들기</button><button type="button" onClick={()=>{setAuthMode('reset');setAuthMessage('');}}>비밀번호 잊어버렸어</button></>:<button type="button" onClick={()=>{setAuthMode('login');setAuthMessage('');}}>로그인으로 돌아가기</button>}</div></div>}{authMessage&&<p className="auth-message" role="status">{authMessage}</p>}</section><div className="panel settings-panel"><div className="setting-row"><div className="setting-icon"><Target size={18}/></div><div><b>목표 시험</b><small>2027 제주 지방직 9급 일반행정</small></div><span className="setting-value">2027년</span></div><div className="setting-row"><div className="setting-icon"><Clock3 size={18}/></div><div><b>주간 순공 목표</b><small>월 6 · 화 6 · 수 6 · 목 9 · 금 9 · 토 9 · 일 5시간</small></div><span className="setting-value">50시간</span></div><div className="setting-row"><div className="setting-icon"><BriefcaseBusiness size={18}/></div><div><b>근무 일정</b><small>월–수 20:00–24:00 · 11/9 추가 16:00–20:00 · 11/20 추가 16:00–20:00</small></div><span className="setting-value">11월</span></div><div className="setting-row"><div className="setting-icon"><MapPin size={18}/></div><div><b>이동 시간</b><small>순공부 시간과 분리해서 관리</small></div><span className="setting-value">{data.trips.length}개 경로</span></div></div><div className="panel settings-panel"><div className="panel-heading"><div><div className="eyebrow">DATA</div><h2>내 기록</h2></div></div><p className="settings-copy">현재 기록은 이 브라우저에 자동 저장돼. 다른 기기에서도 쓰려면 Supabase 연결이 필요해.</p><button className="export-button" onClick={()=>{const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='합격기록장-백업.json';a.click();URL.revokeObjectURL(a.href);}}>기록 백업 다운로드 <ArrowRight size={15}/></button></div></>}
       </div><footer className="footer"><span>합격 기록장 <i>·</i> 하루씩 쌓는 나의 합격 기록</span><span>STAY STEADY, KEEP GOING.</span></footer></main>
       <nav className="mobile-nav">{menu.map(({label,icon:Icon})=><button className={tab===label?'selected':''} key={label} onClick={()=>setTab(label)}><Icon size={19}/><small>{label}</small></button>)}</nav>
       {modal && <div className="modal-backdrop" onMouseDown={(e)=>{if(e.target===e.currentTarget)setModal('')}}><div className="modal"><div className="modal-head"><div><div className="eyebrow">{modal==='session'?'STUDY LOG':'WALKING ROUTE'}</div><h2>{modal==='session'?'공부 기록 추가':'이동 경로 추가'}</h2></div><button className="icon-button" onClick={()=>setModal('')}><X size={18}/></button></div>{modal==='session'?<form onSubmit={addSession}><label>과목<select value={form.subject} onChange={e=>setForm({...form,subject:e.target.value})}>{subjects.map(s=><option key={s}>{s}</option>)}</select></label><label>학습 종류<select value={form.kind} onChange={e=>setForm({...form,kind:e.target.value})}><option>복습·문제풀이</option><option>인강 시청</option><option>단어 암기</option><option>모의고사</option></select></label><label>공부 시간<select value={form.minutes} onChange={e=>setForm({...form,minutes:e.target.value})}>{[25,30,45,60,90,120,150,180].map(n=><option value={n} key={n}>{n<60?`${n}분`:`${Math.floor(n/60)}시간${n%60?` ${n%60}분`:''}`}</option>)}</select></label><label>오늘 공부한 내용 <textarea placeholder="예: 행정법 기본강의 3강, 처분성 기출 10문제" value={form.memo} onChange={e=>setForm({...form,memo:e.target.value})}/></label><button className="primary-button submit-button" type="submit"><Check size={16}/> 기록 저장</button></form>:<form onSubmit={addTrip}><label>이동 경로<input required placeholder="예: 집 → 도서관" value={tripForm.route} onChange={e=>setTripForm({...tripForm,route:e.target.value})}/></label><label>소요 시간<select value={tripForm.minutes} onChange={e=>setTripForm({...tripForm,minutes:e.target.value})}>{[2,5,9,10,12,13,15,20,25,30,40,60].map(n=><option value={n} key={n}>{n}분</option>)}</select></label><label>메모<input value={tripForm.note} onChange={e=>setTripForm({...tripForm,note:e.target.value})}/></label><button className="primary-button submit-button" type="submit"><Check size={16}/> 이동 기록 저장</button></form>}</div></div>}{toast&&<div className="toast"><Check size={15}/>{toast}</div>}
