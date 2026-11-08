@@ -71,6 +71,8 @@ body { font-size: 14px; line-height: 1.55; }
 .sync-pill.syncing { background: #edf3f8; color: #4a6171; border-color: #dfe8ef; }
 .sync-pill.error { background: #fbefec; color: #944c3d; border-color: #f0dcd6; }
 .sync-pill-icon { display: grid; place-items: center; }
+.header-brand { display: inline-flex; align-items: center; gap: 7px; padding: 0; border: 0; background: transparent; color: #557364; font-size: 14px; font-weight: 750; white-space: nowrap; }
+.header-brand:hover { color: #3f5e4b; }
 .connection-panel { margin-bottom: 14px; }
 .connection-status { padding: 5px 9px; border-radius: 999px; background: #f0f1ed; color: #565e55; font-size: 11px; font-weight: 700; white-space: nowrap; }
 .connection-status.synced { background: #e8f1e9; color: #46634d; }
@@ -106,7 +108,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 @media (max-width: 760px) {
   .content { width: calc(100% - 28px); padding-top: 19px; }
   .topbar { height: 58px; padding-inline: 14px; }
-  .mobile-brand { font-size: 14px; }
+  .header-brand { font-size: 14px; }
   .date-pill { font-size: 11px; }
   .welcome { gap: 8px; }
   .welcome h1 { font-size: 24px; line-height: 1.4; }
