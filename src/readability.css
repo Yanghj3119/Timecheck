@@ -203,3 +203,20 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .course-group-progress { height: 6px; overflow: hidden; border-radius: 9px; background: #edf0eb; }
 .course-group-progress i { display: block; height: 100%; border-radius: inherit; background: #81a18b; }
 @media (max-width: 760px) { .course-group-summary { gap: 8px; } .course-group-summary > strong { min-width: 45px; font-size: 17px; } .course-group-summary b { font-size: 13px; } }
+
+.course-mini-summary { display: grid; grid-template-columns: auto 1fr; align-items: baseline; gap: 4px 10px; padding-bottom: 10px; }
+.course-mini-summary > b { font-size: 20px; }
+.course-mini-summary > span { color: #596359; font-size: 11px; }
+.course-mini-summary > .progress { grid-column: 1 / -1; }
+.mini-course { padding: 10px 0; border-top: 1px solid #efeee9; }
+.mini-course-top { display: grid; grid-template-columns: 52px minmax(0, 1fr) 42px; align-items: center; gap: 8px; }
+.mini-course-top > span { color: #617969; font-size: 11px; font-weight: 700; }
+.mini-course-top > b { overflow: hidden; color: #393e37; font-size: 11px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+.mini-course-top > strong { color: #567360; font-size: 13px; text-align: right; font-variant-numeric: tabular-nums; }
+.mini-course-bottom { display: grid; grid-template-columns: 52px minmax(0, 1fr) 30px; align-items: center; gap: 8px; margin-top: 6px; }
+.mini-course-bottom > small { color: #777c73; font-size: 10px; white-space: nowrap; }
+.mini-course-progress { height: 5px; overflow: hidden; border-radius: 8px; background: #eff0eb; }
+.mini-course-progress i { display: block; height: 100%; border-radius: inherit; background: #83a08a; }
+.mini-course-bottom > button { width: 28px; height: 28px; display: grid; place-items: center; border: 1px solid #e3e9e2; border-radius: 8px; background: #f8faf8; color: #607b68; }
+.mini-course-bottom > button:hover { background: #eaf0ea; }
+@media (max-width: 760px) { .mini-course { padding: 9px 0; } .mini-course-top { grid-template-columns: 48px minmax(0, 1fr) 38px; gap: 6px; } .mini-course-top > b { font-size: 10px; } .mini-course-bottom { grid-template-columns: 48px minmax(0, 1fr) 28px; gap: 6px; } }
