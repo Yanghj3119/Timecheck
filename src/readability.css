@@ -193,3 +193,13 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   .schedule-row { grid-template-columns: 68px 12px minmax(0, 1fr) auto; }
   .schedule-title { font-size: 12px; }
 }
+
+.course-group-head { gap: 12px; }
+.course-group-summary { min-width: 0; flex: 1; display: flex; align-items: center; gap: 14px; }
+.course-group-summary > div { min-width: 0; flex: 1; display: grid; gap: 3px; }
+.course-group-summary b { font-size: 14px; }
+.course-group-summary small { font-size: 11px; color: #555b53; }
+.course-group-summary > strong { min-width: 54px; text-align: right; color: #567360; font-size: 20px; font-variant-numeric: tabular-nums; }
+.course-group-progress { height: 6px; overflow: hidden; border-radius: 9px; background: #edf0eb; }
+.course-group-progress i { display: block; height: 100%; border-radius: inherit; background: #81a18b; }
+@media (max-width: 760px) { .course-group-summary { gap: 8px; } .course-group-summary > strong { min-width: 45px; font-size: 17px; } .course-group-summary b { font-size: 13px; } }
