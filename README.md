@@ -40,7 +40,7 @@ GitHub 저장소: https://github.com/Yanghj3119/Timecheck
 
 ## GitHub와 Vercel 배포
 
-Vercel에서 `Yanghj3119/Timecheck` 저장소를 가져오면 됩니다. Framework Preset은 Vite, Build Command는 `pnpm run build`, Output Directory는 `dist`로 설정합니다. 이 초기 버전은 Supabase 키 없이도 사용할 수 있습니다.
+Vercel에서 `Yanghj3119/Timecheck` 저장소를 가져오면 됩니다. Framework Preset은 Vite, Build Command는 `pnpm run build`, Output Directory는 `dist`로 설정합니다. 환경변수가 없어도 앱은 기기 저장 방식으로 열리지만, Supabase 동기화에는 아래 환경변수가 필요합니다.
 
 ## Supabase 확장
 
@@ -49,5 +49,14 @@ Supabase에 실행할 SQL 파일은 [`supabase/schema.sql`](supabase/schema.sql)
 1. Supabase 대시보드에서 프로젝트를 열고 **SQL Editor → New query**를 선택합니다.
 2. `supabase/schema.sql` 파일 전체를 복사해 붙여넣고 **Run**을 누릅니다.
 3. `study_sessions`, `travel_routes`, `study_courses` 테이블과 로그인 사용자별 RLS 정책이 만들어집니다.
+4. 이미 기본 SQL을 실행했다면 `supabase/sync_migration.sql`도 SQL Editor에서 실행해 로컬 식별자와 강의 연결 열을 추가합니다.
+5. Vercel 프로젝트 Settings → Environment Variables에 다음 값을 등록하고 새 배포를 만듭니다.
 
-SQL을 실행해도 앱과 Supabase 간 로그인·동기화는 아직 연결되지 않습니다. 현재 공부와 이동 기록은 브라우저에 저장됩니다. 나중에 연동할 때 Vercel 환경변수 이름은 `VITE_SUPABASE_URL`과 `VITE_SUPABASE_PUBLISHABLE_KEY`를 사용하면 됩니다. Supabase 최신 React 안내가 publishable key 사용을 권장합니다. `service_role` 또는 secret key는 브라우저에 넣지 마세요.
+```text
+VITE_SUPABASE_URL
+VITE_SUPABASE_PUBLISHABLE_KEY
+```
+
+값은 Supabase Project URL과 Publishable key입니다. 브라우저 앱에는 publishable key만 사용하고 `service_role`이나 secret key는 넣지 마세요.
+
+앱의 **설정 → 기기 간 기록 동기화**에서 이메일을 입력해 로그인 링크를 받습니다. Supabase **Authentication → URL Configuration**의 Redirect URLs에 배포 주소를 추가해야 로그인 링크가 돌아옵니다. 처음 로그인하면 현재 브라우저의 공부 기록·강의 진도·이동 경로를 계정에 합쳐 저장하고, 이후 기록은 Supabase와 동기화됩니다. 다른 기기에서도 같은 이메일로 로그인하면 기록을 불러옵니다. 로그인하지 않았거나 환경변수가 없으면 브라우저 저장 방식으로 계속 사용할 수 있습니다.
