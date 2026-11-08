@@ -1,0 +1,165 @@
+/* Larger type, clearer contrast, and more breathing room across the app. */
+:root {
+  --muted-readable: #62675f;
+  --line-readable: #e5e6df;
+}
+
+body { font-size: 14px; line-height: 1.55; }
+.eyebrow { font-size: 11px; color: #68736a; letter-spacing: 1px; }
+.brand span, .profile-card small, .side-label { font-size: 10px; color: #656a62; }
+.nav-item { font-size: 14px; }
+.goal-mini small, .sync-state { font-size: 11px; color: #62675f; }
+.date-pill { font-size: 12px; }
+.welcome p, .page-title p { font-size: 13px; color: #62675f; line-height: 1.65; }
+.welcome h1 { line-height: 1.35; }
+.stat-head { font-size: 13px; color: #50564f; }
+.stat-foot { font-size: 12px; color: #596057; }
+.stat-foot b, .of-total { font-size: 12px; color: #4f564e; }
+.stat-value small { font-size: 13px; color: #555b53; }
+.green-chip { font-size: 11px; }
+.panel-heading h2 { font-size: 17px; }
+.text-button, .primary-button, .today-button { font-size: 12px; }
+.schedule-row { min-height: 56px; }
+.time-col { font-size: 12px; color: #555b53; }
+.schedule-title { font-size: 13px; line-height: 1.45; }
+.schedule-info small { font-size: 11px; color: #62675f; line-height: 1.5; }
+.tag, .subject-pill { font-size: 10px; }
+.schedule-note { font-size: 11px; color: #555d54; line-height: 1.55; }
+.subject-row>b { font-size: 12px; }
+.subject-row small, .record-detail small, .record-time small,
+.route-row small, .route-hint { font-size: 11px; color: #62675f; }
+.wide-add { font-size: 12px; }
+.record-detail b, .route-row b { font-size: 13px; }
+.record-time b { font-size: 13px; }
+.empty-state b { font-size: 13px; }
+.empty-state span { font-size: 12px; }
+.page-title h1 { font-size: 30px; }
+.week-switch>b { font-size: 14px; }
+.week-head { font-size: 11px; color: #555b53; }
+.week-day b, .week-target { font-size: 13px; }
+.week-day small, .week-actual>span, .week-total span { font-size: 11px; color: #555b53; }
+.tiny-subject, .work-tag { font-size: 11px; }
+.week-total b, .week-total strong { font-size: 12px; }
+.info-banner b { font-size: 12px; }
+.info-banner span { font-size: 12px; color: #505b51; line-height: 1.6; }
+.record-summary span, .record-count { font-size: 11px; color: #555b53; }
+.record-summary b { font-size: 20px; }
+.analytic-total>span { font-size: 12px; color: #555b53; }
+.analytics-subject b, .analytics-subject strong { font-size: 13px; }
+.setting-row b { font-size: 13px; }
+.setting-row small, .setting-value, .settings-copy { font-size: 12px; color: #555b53; }
+.lecture-total>b { font-size: 20px; }
+.lecture-total>span, .course-subject-tabs span { font-size: 11px; color: #4f5b51; }
+.lecture-plan-panel { margin: 16px 0; padding: 0; overflow: hidden; }
+.lecture-plan-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 18px 20px; background: #f1f5f1; border-bottom: 1px solid var(--line-readable); }
+.lecture-plan-head h2 { margin: 3px 0; font-size: 19px; }
+.lecture-plan-head p { margin: 0; color: #50584f; font-size: 12px; line-height: 1.6; }
+.lecture-plan-total { flex: 0 0 auto; padding: 8px 10px; border-radius: 8px; background: #e2ebe3; color: #3f5d4a; font-size: 11px; font-weight: 700; }
+.lecture-plan-list { display: grid; }
+.lecture-plan-day { display: grid; grid-template-columns: 110px minmax(0, 1fr); gap: 12px; padding: 13px 20px; border-bottom: 1px solid #eceee8; }
+.lecture-plan-day:nth-child(even) { background: #fcfcfa; }
+.lecture-plan-date b { display: block; font-size: 14px; }
+.lecture-plan-date span { display: block; margin-top: 3px; color: #46624f; font-size: 12px; font-weight: 700; }
+.lecture-plan-date i { color: #62675f; font-size: 11px; font-style: normal; font-weight: 400; }
+.lecture-plan-tasks { display: grid; gap: 5px; }
+.lecture-plan-tasks span { color: #555b53; font-size: 12px; line-height: 1.55; }
+.lecture-plan-tasks b { display: inline-block; min-width: 48px; margin-right: 5px; color: #3f5d4a; }
+.lecture-plan-work { grid-column: 2; display: flex; align-items: center; gap: 5px; color: #745e43; font-size: 11px; }
+.lecture-plan-note { margin: 0; padding: 13px 20px; background: #faf7f0; color: #65583f; font-size: 12px; line-height: 1.6; }
+.course-group-head b { font-size: 14px; }
+.course-group-head small { font-size: 11px; color: #555b53; }
+.course-row { gap: 16px; padding: 15px 0; }
+.course-name>b { font-size: 12px; line-height: 1.55; }
+.course-count>b { font-size: 13px; }
+.course-count>small { font-size: 11px; }
+.lecture-complete { font-size: 11px; padding: 9px 11px; }
+.shift-notice { font-size: 12px; line-height: 1.55; color: #67553e; }
+.modal-head h2 { font-size: 20px; }
+.modal label { font-size: 12px; }
+.modal input, .modal select, .modal textarea { font-size: 14px; }
+.toast { font-size: 13px; }
+.footer { font-size: 10px; }
+button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible {
+  outline: 3px solid #8ba292;
+  outline-offset: 2px;
+}
+
+@media (max-width: 760px) {
+  .content { width: calc(100% - 28px); padding-top: 19px; }
+  .topbar { height: 58px; padding-inline: 14px; }
+  .mobile-brand { font-size: 14px; }
+  .date-pill { font-size: 11px; }
+  .welcome { gap: 8px; }
+  .welcome h1 { font-size: 24px; line-height: 1.4; }
+  .welcome p { font-size: 12px; }
+  .welcome-stamp { width: 78px; height: 70px; }
+  .welcome-stamp span { font-size: 9px; }
+  .welcome-stamp b { font-size: 11px; }
+  .welcome-stamp small { font-size: 7px; }
+  .stat-grid { gap: 8px; }
+  .stat-card { min-height: 120px; padding: 12px; }
+  .stat-head { font-size: 12px; }
+  .stat-foot { font-size: 11px; gap: 5px; }
+  .stat-value { font-size: 27px; }
+  .stat-value small, .stat-foot b { font-size: 11px; }
+  .panel { padding: 16px; border-radius: 14px; }
+  .panel-heading h2 { font-size: 17px; }
+  .text-button { font-size: 11px; }
+  .schedule-row { grid-template-columns: 74px 14px minmax(0, 1fr) auto; min-height: 58px; }
+  .time-col { font-size: 11px; }
+  .schedule-title { font-size: 13px; }
+  .schedule-info small { font-size: 11px; }
+  .schedule-note { font-size: 11px; align-items: flex-start; }
+  .subject-row { grid-template-columns: 28px 54px minmax(35px, 1fr) 54px; gap: 7px; }
+  .subject-icon { width: 28px; height: 28px; font-size: 11px; }
+  .subject-row>b, .subject-row small { font-size: 11px; }
+  .route-list { gap: 15px; }
+  .route-row b, .record-detail b { font-size: 12px; }
+  .route-row small, .route-hint, .record-detail small { font-size: 11px; }
+  .page-title h1 { font-size: 27px; }
+  .page-title p { font-size: 12px; }
+  .week-switch>b { font-size: 12px; }
+  .weekly-table { overflow-x: auto; }
+  .week-head, .week-row, .week-total { min-width: 630px; }
+  .tiny-subject, .work-tag { font-size: 10px; }
+  .info-banner span { font-size: 12px; }
+  .record-summary span { font-size: 10px; }
+  .record-summary b { font-size: 16px; }
+  .course-row { grid-template-columns: minmax(0, 1fr) 64px; gap: 9px; padding: 14px 0; }
+  .course-name>b { font-size: 12px; }
+  .course-count>b { font-size: 12px; }
+  .course-count>small { font-size: 10px; }
+  .lecture-complete { min-height: 42px; font-size: 12px; }
+  .course-group { padding-inline: 14px; }
+  .course-group-head b { font-size: 13px; }
+  .course-group-head small { font-size: 11px; }
+  .course-subject-tabs span { font-size: 11px; }
+  .lecture-total>b { font-size: 16px; }
+  .lecture-total>span { font-size: 10px; }
+  .lecture-plan-panel { margin-top: 12px; }
+  .lecture-plan-head { align-items: flex-start; flex-direction: column; padding: 15px; }
+  .lecture-plan-head h2 { font-size: 17px; }
+  .lecture-plan-head p { font-size: 12px; }
+  .lecture-plan-total { font-size: 11px; }
+  .lecture-plan-day { grid-template-columns: 75px minmax(0, 1fr); gap: 9px; padding: 12px; }
+  .lecture-plan-date b { font-size: 13px; }
+  .lecture-plan-date span { font-size: 11px; }
+  .lecture-plan-date i { display: block; font-size: 10px; }
+  .lecture-plan-tasks { gap: 7px; }
+  .lecture-plan-tasks span { font-size: 11px; overflow-wrap: anywhere; }
+  .lecture-plan-tasks b { min-width: 40px; }
+  .lecture-plan-work { grid-column: 1 / -1; font-size: 11px; }
+  .lecture-plan-note { padding: 12px 14px; font-size: 11px; }
+  .setting-row b { font-size: 12px; }
+  .setting-row small, .setting-value, .settings-copy { font-size: 11px; }
+  .mobile-nav { height: 68px; }
+  .mobile-nav small { font-size: 10px; }
+  .footer { font-size: 9px; }
+}
+
+@media (max-width: 380px) {
+  .welcome h1 { font-size: 22px; }
+  .content { width: calc(100% - 24px); }
+  .schedule-row { grid-template-columns: 68px 12px minmax(0, 1fr) auto; }
+  .schedule-title { font-size: 12px; }
+}
