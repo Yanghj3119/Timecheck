@@ -220,3 +220,23 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .mini-course-bottom > button { width: 28px; height: 28px; display: grid; place-items: center; border: 1px solid #e3e9e2; border-radius: 8px; background: #f8faf8; color: #607b68; }
 .mini-course-bottom > button:hover { background: #eaf0ea; }
 @media (max-width: 760px) { .mini-course { padding: 9px 0; } .mini-course-top { grid-template-columns: 48px minmax(0, 1fr) 38px; gap: 6px; } .mini-course-top > b { font-size: 10px; } .mini-course-bottom { grid-template-columns: 48px minmax(0, 1fr) 28px; gap: 6px; } }
+
+.weekly-agenda-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-bottom: 14px; }
+.weekly-day-card { min-width: 0; padding: 16px; }
+.weekly-day-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.weekly-day-title { display: flex; align-items: center; gap: 7px; }
+.weekly-day-title b { font-size: 14px; }
+.weekly-day-title i { padding: 3px 6px; border-radius: 5px; background: #e8efe9; color: #55715f; font-size: 9px; font-style: normal; }
+.weekly-day-header small { display: block; margin-top: 4px; color: #7d8179; font-size: 10px; }
+.weekly-day-header > strong { color: #496957; font-size: 21px; font-variant-numeric: tabular-nums; }
+.weekly-day-header > strong small { display: inline; margin-left: 3px; color: #737970; font-size: 10px; }
+.weekly-day-progress { height: 5px; margin: 11px 0 7px; overflow: hidden; border-radius: 8px; background: #edf0eb; }
+.weekly-day-progress i { display: block; height: 100%; border-radius: inherit; background: #86a08a; }
+.weekly-agenda-list { display: grid; }
+.weekly-agenda-row { display: grid; grid-template-columns: 88px minmax(0, 1fr); gap: 8px; align-items: start; padding: 8px 0; border-top: 1px solid #f0f0eb; }
+.weekly-agenda-row time { padding-top: 1px; color: #777d73; font-size: 10px; font-variant-numeric: tabular-nums; font-weight: 650; }
+.weekly-agenda-row b { display: block; color: #383d36; font-size: 11px; line-height: 1.45; }
+.weekly-agenda-row small { display: block; margin-top: 2px; color: #858980; font-size: 9px; line-height: 1.45; }
+.weekly-agenda-row.work b { color: #9d6848; }
+.weekly-agenda-row.break b { color: #827252; }
+@media (max-width: 760px) { .weekly-agenda-grid { grid-template-columns: minmax(0, 1fr); gap: 10px; } .weekly-day-card { padding: 14px; } .weekly-agenda-row { grid-template-columns: 82px minmax(0, 1fr); } }
