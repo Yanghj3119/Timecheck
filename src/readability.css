@@ -66,6 +66,15 @@ body { font-size: 14px; line-height: 1.55; }
 .lecture-plan-tasks b { display: inline-block; min-width: 48px; margin-right: 5px; color: #3f5d4a; }
 .lecture-plan-work { grid-column: 2; display: flex; align-items: center; gap: 5px; color: #745e43; font-size: 11px; }
 .lecture-plan-note { margin: 0; padding: 13px 20px; background: #faf7f0; color: #65583f; font-size: 12px; line-height: 1.6; }
+.study-plan-status { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 16px; margin: 12px 0; padding: 16px 18px; }
+.study-plan-status>div { display: grid; gap: 4px; }
+.study-plan-status span { color: #646b62; font-size: 11px; }
+.study-plan-status b { color: #30483a; font-size: 15px; }
+.study-plan-status p { grid-column: 1 / -1; margin: 0; padding-top: 8px; border-top: 1px solid #eceee8; color: #735a42; font-size: 11px; }
+.lecture-plan-status { grid-column: 2; display: flex; flex-wrap: wrap; align-items: center; gap: 5px 10px; padding: 6px 8px; border-radius: 6px; background: #edf4ee; color: #425f4a; font-size: 10px; }
+.lecture-plan-status b { font-size: 10px; }
+.lecture-plan-status.missed { background: #fff3e9; color: #855333; }
+.lecture-plan-status.recovery { display: inline-flex; justify-self: start; }
 .sync-pill { display: inline-flex; align-items: center; gap: 6px; padding: 7px 9px; border: 1px solid #e1e8e1; border-radius: 999px; background: #f4f7f3; color: #48624f; font-size: 11px; font-weight: 650; white-space: nowrap; }
 .sync-pill.signed-out, .sync-pill.local-only { background: #f4f4f1; color: #5d625a; border-color: #e6e6df; }
 .sync-pill.syncing { background: #edf3f8; color: #4a6171; border-color: #dfe8ef; }
@@ -73,6 +82,8 @@ body { font-size: 14px; line-height: 1.55; }
 .sync-pill-icon { display: grid; place-items: center; }
 .header-brand { display: inline-flex; align-items: center; gap: 7px; padding: 0; border: 0; background: transparent; color: #557364; font-size: 14px; font-weight: 750; white-space: nowrap; }
 .header-brand:hover { color: #3f5e4b; }
+.brand-home { display: inline-flex; align-items: center; gap: 11px; padding: 0; border: 0; background: transparent; color: inherit; text-align: left; }
+.brand-home:hover strong { color: #3f5e4b; }
 .connection-panel { margin-bottom: 14px; }
 .connection-status { padding: 5px 9px; border-radius: 999px; background: #f0f1ed; color: #565e55; font-size: 11px; font-weight: 700; white-space: nowrap; }
 .connection-status.synced { background: #e8f1e9; color: #46634d; }
@@ -173,6 +184,9 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   .lecture-plan-tasks b { min-width: 40px; }
   .lecture-plan-work { grid-column: 1 / -1; font-size: 11px; }
   .lecture-plan-note { padding: 12px 14px; font-size: 11px; }
+  .study-plan-status { padding: 13px; gap: 8px; }
+  .study-plan-status b { font-size: 13px; }
+  .lecture-plan-status { grid-column: 1 / -1; }
   .setting-row b { font-size: 12px; }
   .setting-row small, .setting-value, .settings-copy { font-size: 11px; }
   .mobile-nav { height: 68px; }
