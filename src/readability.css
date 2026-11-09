@@ -254,3 +254,23 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .mobile-menu-item.selected { background: #edf2ee; color: #476156; }
 @media (max-width: 760px) { .topbar { gap: 6px; } .mobile-menu-toggle { flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; gap: 4px; min-height: 36px; padding: 0 9px; border: 1px solid #e8ebe5; border-radius: 9px; background: #fff; color: #587365; font-size: 11px; font-weight: 650; } .top-right { margin-left: auto; flex-shrink: 1; } .mobile-menu-panel { padding-inline: 15px; } }
 @media (max-width: 380px) { .sync-pill, .small-avatar { display: none !important; } .date-pill { white-space: nowrap; } .header-brand { font-size: 12px; } .mobile-menu-toggle { padding-inline: 7px; } }
+
+.compact-lecture-plan { overflow: hidden; }
+.lecture-plan-summary { position: relative; display: block; cursor: pointer; list-style: none; }
+.lecture-plan-summary::-webkit-details-marker { display: none; }
+.lecture-plan-summary::after { content: '일정 펼치기 ↓'; display: block; padding: 9px 18px; color: #526d5a; background: #f8faf7; font-size: 11px; font-weight: 700; text-align: center; }
+.compact-lecture-plan[open] .lecture-plan-summary::after { content: '일정 접기 ↑'; }
+.compact-lecture-plan[open] .lecture-plan-head { border-bottom: 0; }
+.compact-lecture-plan .lecture-plan-list { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0; }
+.compact-lecture-plan .lecture-plan-day { display: flex; flex-direction: column; gap: 5px; min-width: 0; padding: 10px 12px; border-right: 1px solid #eceee8; }
+.compact-lecture-plan .lecture-plan-date { display: flex; align-items: baseline; justify-content: space-between; gap: 5px; }
+.compact-lecture-plan .lecture-plan-date b { font-size: 12px; white-space: nowrap; }
+.compact-lecture-plan .lecture-plan-date span { margin: 0; font-size: 10px; white-space: nowrap; }
+.compact-lecture-plan .lecture-plan-date i { font-size: 9px; }
+.compact-lecture-plan .lecture-plan-tasks { gap: 2px; }
+.compact-lecture-plan .lecture-plan-tasks span { font-size: 10px; line-height: 1.4; }
+.compact-lecture-plan .lecture-plan-tasks b { min-width: 38px; margin-right: 3px; }
+.compact-lecture-plan .lecture-plan-work { margin-top: 2px; font-size: 9px; }
+.compact-lecture-plan .lecture-plan-note { font-size: 10px; }
+@media (max-width: 760px) { .compact-lecture-plan .lecture-plan-list { grid-template-columns: repeat(2, minmax(0, 1fr)); } .compact-lecture-plan .lecture-plan-day { padding: 9px; } .compact-lecture-plan .lecture-plan-date { align-items: flex-start; flex-direction: column; gap: 1px; } .compact-lecture-plan .lecture-plan-date i { display: inline; font-size: 9px; } .compact-lecture-plan .lecture-plan-tasks span { font-size: 9px; } .compact-lecture-plan .lecture-plan-tasks b { min-width: 32px; } .lecture-plan-summary::after { padding: 10px; } }
+@media (max-width: 380px) { .compact-lecture-plan .lecture-plan-date b { font-size: 11px; } .compact-lecture-plan .lecture-plan-date span { font-size: 9px; } }
