@@ -283,3 +283,9 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .sidebar-toggle { display: inline-flex; flex: 0 0 auto; align-items: center; justify-content: center; gap: 6px; min-height: 36px; padding: 0 10px; border: 1px solid #e4e9e2; border-radius: 9px; background: #fff; color: #557364; font-size: 11px; font-weight: 700; }
 .sidebar-toggle:hover { background: #f2f6f2; }
 @media (max-width: 760px) { .sidebar { width: min(300px, 86vw); height: 100vh; height: 100dvh; overflow-y: auto; padding-top: max(18px, env(safe-area-inset-top)); padding-bottom: max(18px, env(safe-area-inset-bottom)); } .sidebar-toggle { min-height: 36px; padding-inline: 8px; } }
+
+.header-brand-group { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 5px; }
+.sidebar-toggle { min-height: 34px; gap: 5px; padding-inline: 8px; border: 0; border-radius: 9px; background: transparent; color: #557364; font-size: 11px; }
+.sidebar-toggle:hover { background: #edf2ee; color: #3f5e4b; }
+.header-brand { gap: 7px; }
+@media (max-width: 760px) { .header-brand-group { gap: 3px; } .sidebar-toggle { min-height: 34px; padding-inline: 6px; } }
