@@ -75,6 +75,24 @@ body { font-size: 14px; line-height: 1.55; }
 .lecture-plan-status b { font-size: 10px; }
 .lecture-plan-status.missed { background: #fff3e9; color: #855333; }
 .lecture-plan-status.recovery { display: inline-flex; justify-self: start; }
+.catchup-panel { margin: 12px 0; }
+.catchup-intro { margin: -5px 0 12px; color: #656b62; font-size: 12px; line-height: 1.6; }
+.catchup-list { display: grid; gap: 7px; }
+.catchup-item { display: grid; grid-template-columns: 34px minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 10px; border: 1px solid #eceee8; border-radius: 9px; background: #fff; }
+.catchup-icon { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 9px; background: #edf3ee; color: #587365; }
+.catchup-icon.words { background: #f2eff8; color: #71628b; }
+.catchup-copy { min-width: 0; }
+.catchup-copy b, .catchup-copy span { display: block; }
+.catchup-copy b { color: #333b34; font-size: 12px; }
+.catchup-copy span { margin-top: 3px; color: #747a71; font-size: 10px; }
+.catchup-complete { padding: 7px 10px; border: 1px solid #d8e4d9; border-radius: 7px; background: #edf4ee; color: #46624f; font-size: 10px; font-weight: 700; white-space: nowrap; }
+.catchup-complete:hover { background: #e2eee4; }
+.catchup-empty { display: flex; align-items: center; gap: 8px; padding: 13px; border-radius: 8px; background: #f3f6f2; color: #4d6855; font-size: 11px; }
+.catchup-history { margin-top: 12px; border-top: 1px solid #eceee8; padding-top: 10px; }
+.catchup-history summary { color: #59675d; cursor: pointer; font-size: 11px; font-weight: 700; }
+.catchup-history .catchup-list { margin-top: 9px; }
+.catchup-item.done { background: #f8faf7; color: #66806b; }
+.catchup-item.done .catchup-icon { width: 28px; height: 28px; }
 .sync-pill { display: inline-flex; align-items: center; gap: 6px; padding: 7px 9px; border: 1px solid #e1e8e1; border-radius: 999px; background: #f4f7f3; color: #48624f; font-size: 11px; font-weight: 650; white-space: nowrap; }
 .sync-pill.signed-out, .sync-pill.local-only { background: #f4f4f1; color: #5d625a; border-color: #e6e6df; }
 .sync-pill.syncing { background: #edf3f8; color: #4a6171; border-color: #dfe8ef; }
@@ -187,6 +205,11 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   .study-plan-status { padding: 13px; gap: 8px; }
   .study-plan-status b { font-size: 13px; }
   .lecture-plan-status { grid-column: 1 / -1; }
+  .catchup-panel { padding: 13px; }
+  .catchup-intro { font-size: 11px; }
+  .catchup-item { grid-template-columns: 30px minmax(0, 1fr); gap: 8px; padding: 9px; }
+  .catchup-icon { width: 29px; height: 29px; }
+  .catchup-complete { grid-column: 2; justify-self: start; padding: 7px 9px; }
   .setting-row b { font-size: 12px; }
   .setting-row small, .setting-value, .settings-copy { font-size: 11px; }
   .mobile-nav { height: 68px; }
