@@ -290,7 +290,7 @@ function App() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [modal, setModal] = useState('');
   const [weekShift, setWeekShift] = useState(0);
-  const [form, setForm] = useState({ subject: '영어', kind: '복습·문제풀이', minutes: 60, memo: '' });
+  const [form, setForm] = useState({ subject: '영어', kind: '복습·문제풀이', minutes: 60, memo: '', courseId: '', lecture: '' });
   const [goalInput, setGoalInput] = useState('');
   const [goalNote, setGoalNote] = useState('');
   const [tripForm, setTripForm] = useState({ route: '', minutes: 10, note: '도보' });
@@ -467,7 +467,24 @@ function App() {
   const weekMinutes = weekSessions.reduce((a, s) => a + Number(s.minutes), 0);
   const weekTargetHours = weekDates.reduce((sum, d) => sum + dayTarget(d, lecturePlan), 0);
   const weekTargetMinutes = weekTargetHours * 60;
-  const addSession = (e) => { e.preventDefault(); save({ ...data, sessions: [{ ...form, minutes: Number(form.minutes), date: todayKey(), at: new Date().toISOString() }, ...data.sessions] }); setModal(''); setToast('공부 기록을 저장했어요'); setTimeout(() => setToast(''), 2400); };
+  const formCourse = data.courses.find(course => course.id === form.courseId) || data.courses[0];
+  const formLectureOptions = formCourse ? Array.from({ length: Number(formCourse.total) }, (_, i) => i + 1).filter(n => !isLectureDone(formCourse.id, n)) : [];
+  const formLecture = formLectureOptions.includes(Number(form.lecture)) ? Number(form.lecture) : formLectureOptions[0];
+  const addSession = (e) => {
+    e.preventDefault();
+    const { courseId, lecture, ...rest } = form;
+    if (form.kind === '인강 시청') {
+      if (!formCourse || !formLecture) { setToast('기록할 과정과 강의 번호를 골라줘'); setTimeout(() => setToast(''), 2400); return; }
+      const extra = form.memo.trim() ? ` · ${form.memo.trim()}` : '';
+      const session = { subject: formCourse.subject, kind: '인강 시청', courseId: formCourse.id, minutes: Number(form.minutes), memo: `[lec:${formLecture}] ${formCourse.title} · ${formLecture}강 수강 완료${extra}`, date: todayKey(), at: new Date().toISOString() };
+      save({ ...data, courses: data.courses.map(c => c.id === formCourse.id ? { ...c, completed: Number(c.completed) + 1 } : c), sessions: [session, ...data.sessions] });
+      setForm({ ...form, memo: '', lecture: '' });
+      setModal(''); setToast(`${formCourse.subject} ${formLecture}강 수료로 기록했어요`); setTimeout(() => setToast(''), 2400);
+      return;
+    }
+    save({ ...data, sessions: [{ ...rest, minutes: Number(form.minutes), date: todayKey(), at: new Date().toISOString() }, ...data.sessions] });
+    setModal(''); setToast('공부 기록을 저장했어요'); setTimeout(() => setToast(''), 2400);
+  };
   const addTrip = (e) => { e.preventDefault(); save({ ...data, trips: [...data.trips, { ...tripForm, minutes: Number(tripForm.minutes) }] }); setTripForm({ route: '', minutes: 10, note: '도보' }); setModal(''); };
   const addDailyGoal = (e) => {
     e.preventDefault();
@@ -551,7 +568,7 @@ function App() {
       </div><footer className="footer"><span>합격 기록장 <i>·</i> 하루씩 쌓는 나의 합격 기록</span><span>STAY STEADY, KEEP GOING.</span></footer></main>
       {mobileMenuOpen&&<div className="sidebar-backdrop" onMouseDown={event=>{if(event.target===event.currentTarget)setMobileMenuOpen(false)}}/>}
       <nav className="mobile-nav">{menu.map(({label,icon:Icon})=><button className={tab===label?'selected':''} key={label} onClick={()=>setTab(label)}><Icon size={19}/><small>{label}</small></button>)}</nav>
-      {modal && <div className="modal-backdrop" onMouseDown={(e)=>{if(e.target===e.currentTarget)setModal('')}}><div className="modal"><div className="modal-head"><div><div className="eyebrow">{modal==='session'?'STUDY LOG':'WALKING ROUTE'}</div><h2>{modal==='session'?'공부 기록 추가':'이동 경로 추가'}</h2></div><button className="icon-button" onClick={()=>setModal('')}><X size={18}/></button></div>{modal==='session'?<form onSubmit={addSession}><label>과목<select value={form.subject} onChange={e=>setForm({...form,subject:e.target.value})}>{subjects.map(s=><option key={s}>{s}</option>)}</select></label><label>학습 종류<select value={form.kind} onChange={e=>setForm({...form,kind:e.target.value})}><option>복습·문제풀이</option><option>인강 시청</option><option>단어 암기</option><option>모의고사</option></select></label><label>공부 시간<select value={form.minutes} onChange={e=>setForm({...form,minutes:e.target.value})}>{[25,30,45,60,90,120,150,180].map(n=><option value={n} key={n}>{n<60?`${n}분`:`${Math.floor(n/60)}시간${n%60?` ${n%60}분`:''}`}</option>)}</select></label><label>오늘 공부한 내용 <textarea placeholder="예: 행정법 기본강의 3강, 처분성 기출 10문제" value={form.memo} onChange={e=>setForm({...form,memo:e.target.value})}/></label><button className="primary-button submit-button" type="submit"><Check size={16}/> 기록 저장</button></form>:<form onSubmit={addTrip}><label>이동 경로<input required placeholder="예: 집 → 도서관" value={tripForm.route} onChange={e=>setTripForm({...tripForm,route:e.target.value})}/></label><label>소요 시간<select value={tripForm.minutes} onChange={e=>setTripForm({...tripForm,minutes:e.target.value})}>{[2,5,9,10,12,13,15,20,25,30,40,60].map(n=><option value={n} key={n}>{n}분</option>)}</select></label><label>메모<input value={tripForm.note} onChange={e=>setTripForm({...tripForm,note:e.target.value})}/></label><button className="primary-button submit-button" type="submit"><Check size={16}/> 이동 기록 저장</button></form>}</div></div>}{toast&&<div className="toast"><Check size={15}/>{toast}</div>}
+      {modal && <div className="modal-backdrop" onMouseDown={(e)=>{if(e.target===e.currentTarget)setModal('')}}><div className="modal"><div className="modal-head"><div><div className="eyebrow">{modal==='session'?'STUDY LOG':'WALKING ROUTE'}</div><h2>{modal==='session'?'공부 기록 추가':'이동 경로 추가'}</h2></div><button className="icon-button" onClick={()=>setModal('')}><X size={18}/></button></div>{modal==='session'?<form onSubmit={addSession}>{form.kind!=='인강 시청'&&<label>과목<select value={form.subject} onChange={e=>setForm({...form,subject:e.target.value})}>{subjects.map(s=><option key={s}>{s}</option>)}</select></label>}<label>학습 종류<select value={form.kind} onChange={e=>setForm({...form,kind:e.target.value})}><option>복습·문제풀이</option><option>인강 시청</option><option>단어 암기</option><option>모의고사</option></select></label>{form.kind==='인강 시청'&&<><label>강의 과정<select value={formCourse?.id||''} onChange={e=>setForm({...form,courseId:e.target.value,lecture:''})}>{data.courses.map(c=><option value={c.id} key={c.id}>{c.subject} · {c.title.replace(/^\[\d+\]\s*/, '')}</option>)}</select></label><label>수료한 강의<select value={formLecture||''} onChange={e=>setForm({...form,lecture:e.target.value})}>{formLectureOptions.length?formLectureOptions.map(n=><option value={n} key={n}>{n}강</option>):<option value="">모두 수료했어요</option>}</select></label></>}<label>공부 시간<select value={form.minutes} onChange={e=>setForm({...form,minutes:e.target.value})}>{[25,30,45,60,90,120,150,180].map(n=><option value={n} key={n}>{n<60?`${n}분`:`${Math.floor(n/60)}시간${n%60?` ${n%60}분`:''}`}</option>)}</select></label><label>오늘 공부한 내용 <textarea placeholder="예: 행정법 기본강의 3강, 처분성 기출 10문제" value={form.memo} onChange={e=>setForm({...form,memo:e.target.value})}/></label><button className="primary-button submit-button" type="submit"><Check size={16}/> 기록 저장</button></form>:<form onSubmit={addTrip}><label>이동 경로<input required placeholder="예: 집 → 도서관" value={tripForm.route} onChange={e=>setTripForm({...tripForm,route:e.target.value})}/></label><label>소요 시간<select value={tripForm.minutes} onChange={e=>setTripForm({...tripForm,minutes:e.target.value})}>{[2,5,9,10,12,13,15,20,25,30,40,60].map(n=><option value={n} key={n}>{n}분</option>)}</select></label><label>메모<input value={tripForm.note} onChange={e=>setTripForm({...tripForm,note:e.target.value})}/></label><button className="primary-button submit-button" type="submit"><Check size={16}/> 이동 기록 저장</button></form>}</div></div>}{toast&&<div className="toast"><Check size={15}/>{toast}</div>}
     </div>
 }
 function dayTarget(d, lecturePlan){const key=dateKey(d);if(noStudyDates.has(key))return 0;const planned=lecturePlan.find(day=>dateKey(day.date)===key);if(planned)return planned.goal+planned.wordMinutes/60;if(key>='2026-11-11'&&key<=lecturePlanEnd)return 1;return baseHours[(d.getDay()+6)%7]}
