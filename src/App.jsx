@@ -187,21 +187,6 @@ function buildLecturePlan(courses, sessions = [], today = new Date()) {
     return { ...day, goal: tasks.reduce((sum, task) => sum + task.count, 0), tasks };
   });
 
-  const historical = numberedDays.filter(day => dateKey(day.date) < todayKeyValue);
-  const missedWordMinutes = historical.reduce((sum, day) => {
-    const key = dateKey(day.date);
-    const wordMinutes = sessions.filter(session => session.date === key && session.kind === '단어 암기')
-      .reduce((total, session) => total + Number(session.minutes), 0);
-    return sum + Math.max(0, 60 - wordMinutes);
-  }, 0);
-  const recoveredWordMinutes = sessions
-    .filter(session => session.kind === '단어 암기' && String(session.memo || '').startsWith('[catchup:words|'))
-    .reduce((sum, session) => sum + Number(session.minutes), 0);
-  const carryWordMinutes = Math.max(0, missedWordMinutes - recoveredWordMinutes);
-  const remainingDays = numberedDays.filter(day => dateKey(day.date) >= todayKeyValue).length;
-  const dailyWordRecovery = remainingDays ? Math.floor(carryWordMinutes / remainingDays) : 0;
-  let extraWordMinutes = remainingDays ? carryWordMinutes % remainingDays : 0;
-
   return numberedDays.map(day => {
     const key = dateKey(day.date);
     const actualByCourse = courses.map(course =>
@@ -217,10 +202,8 @@ function buildLecturePlan(courses, sessions = [], today = new Date()) {
       .reduce((sum, session) => sum + Number(session.minutes), 0);
     const vocabularyMinutes = sessions.filter(session => session.date === key && session.kind === '단어 암기')
       .reduce((sum, session) => sum + Number(session.minutes), 0);
-    const isFutureOrToday = key >= todayKeyValue;
-    const wordRecoveryMinutes = isFutureOrToday
-      ? dailyWordRecovery + (extraWordMinutes-- > 0 ? 1 : 0)
-      : 0;
+    // Missed study never changes later days: it only shows up in the catch-up list.
+    const wordRecoveryMinutes = 0;
     return {
       ...day,
       actualLectures: actualByCourse.reduce((sum, count) => sum + count, 0),
