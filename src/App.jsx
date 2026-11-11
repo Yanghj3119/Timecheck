@@ -100,36 +100,78 @@ function buildLecturePlan(courses, sessions = [], today = new Date()) {
     session.courseId && session.kind === '인강 시청' &&
     session.date >= startKey && session.date <= lecturePlanEnd
   );
-  const todayTasks = [
+  const planStartKey = '2026-11-11';
+  const firstRebalanceKey = '2026-11-12';
+  const initialById = new Map(initialCourses.map(course => [course.id, course]));
+  const initialRemaining = courses.map(course => {
+    const baseline = initialById.get(course.id);
+    return Math.max(0, Number(baseline?.total ?? course.total) - Number(baseline?.completed ?? 0));
+  });
+  const baselineTodayTasks = [
     { courseId: 'eng-basic', count: 2 },
     { courseId: 'admin-basic', count: 1 },
   ].map(task => ({
     course: courses.find(course => course.id === task.courseId),
     count: task.count,
   })).filter(task => task.course && task.count > 0);
-  const todayDay = {
+  const baselineToday = {
     date: new Date(lecturePlanStart),
-    goal: todayTasks.reduce((sum, task) => sum + task.count, 0),
-    tasks: todayTasks,
+    goal: baselineTodayTasks.reduce((sum, task) => sum + task.count, 0),
+    tasks: baselineTodayTasks,
   };
-  const futureDates = dates.filter(date => dateKey(date) >= '2026-11-12');
+  const postStartDates = dates.filter(date => dateKey(date) >= firstRebalanceKey);
+  const baselinePostStart = allocateLectureDays(initialCourses, initialRemaining, postStartDates);
+  const baselineByDate = new Map([
+    [planStartKey, baselineToday],
+    ...baselinePostStart.map(day => [dateKey(day.date), day]),
+  ]);
+
+  // Keep all dates before today on the original plan. Recalculate only today and
+  // later from the user's current completed counts, while keeping the plan end date.
+  const activeDates = dates.filter(date => dateKey(date) >= todayKeyValue && dateKey(date) >= firstRebalanceKey);
   const currentRemaining = courses.map(course => Math.max(0, Number(course.total) - Number(course.completed)));
-  const future = allocateLectureDays(courses, currentRemaining, futureDates);
-  const baseDays = [todayDay, ...future];
-  const nextLectureByCourse = new Map(courses.map(course => {
-    const completedToday = planSessions.filter(session => session.courseId === course.id && session.date === todayKeyValue).length;
-    return [course.id, Math.max(1, Number(course.completed) - completedToday + 1)];
-  }));
-  const numberedDays = baseDays.map(day => {
-    if (dateKey(day.date) < todayKeyValue) return day;
-    return { ...day, tasks: day.tasks.map(({ course, count }) => {
-      const first = nextLectureByCourse.get(course.id) || 1;
-      const lectureNumbers = Array.from({ length: count }, (_, index) => first + index);
-      nextLectureByCourse.set(course.id, first + count);
-      return { course, count, lectureNumbers };
-    }) };
+  const activeDays = allocateLectureDays(courses, currentRemaining, activeDates);
+  const activeByDate = new Map(activeDays.map(day => [dateKey(day.date), day]));
+  const baseDays = dates.map(date => {
+    const key = dateKey(date);
+    if (key < todayKeyValue) return baselineByDate.get(key) || { date, goal: 0, tasks: [] };
+    if (key === planStartKey && todayKeyValue <= planStartKey) return baselineToday;
+    return activeByDate.get(key) || { date, goal: 0, tasks: [] };
   });
-  const historical = baseDays.filter(day => dateKey(day.date) < todayKeyValue);
+
+  const todayCompletedByCourse = new Map(courses.map(course => [
+    course.id,
+    planSessions.filter(session => session.courseId === course.id && session.date === todayKeyValue).length,
+  ]));
+  const baselineNext = new Map(initialCourses.map(course => [course.id, Number(course.completed) + 1]));
+  const activeNext = new Map(courses.map(course => [course.id, Number(course.completed) + 1]));
+  const numberedDays = baseDays.map(day => {
+    const key = dateKey(day.date);
+    const isPast = key < todayKeyValue;
+    const isInitialPlanDay = key === planStartKey && todayKeyValue <= planStartKey;
+    return {
+      ...day,
+      tasks: day.tasks.map(({ course, count }) => {
+        let first;
+        if (isPast) {
+          first = baselineNext.get(course.id) || 1;
+          baselineNext.set(course.id, first + count);
+        } else if (isInitialPlanDay) {
+          first = Math.max(1, Number(course.completed) - (todayCompletedByCourse.get(course.id) || 0) + 1);
+        } else {
+          first = activeNext.get(course.id) || 1;
+          activeNext.set(course.id, first + count);
+        }
+        return {
+          course,
+          count,
+          lectureNumbers: Array.from({ length: count }, (_, index) => first + index),
+        };
+      }),
+    };
+  });
+
+  const historical = numberedDays.filter(day => dateKey(day.date) < todayKeyValue);
   const missedWordMinutes = historical.reduce((sum, day) => {
     const key = dateKey(day.date);
     const wordMinutes = sessions.filter(session => session.date === key && session.kind === '단어 암기')
@@ -140,7 +182,7 @@ function buildLecturePlan(courses, sessions = [], today = new Date()) {
     .filter(session => session.kind === '단어 암기' && String(session.memo || '').startsWith('[catchup:words|'))
     .reduce((sum, session) => sum + Number(session.minutes), 0);
   const carryWordMinutes = Math.max(0, missedWordMinutes - recoveredWordMinutes);
-  const remainingDays = baseDays.filter(day => dateKey(day.date) >= todayKeyValue).length;
+  const remainingDays = numberedDays.filter(day => dateKey(day.date) >= todayKeyValue).length;
   const dailyWordRecovery = remainingDays ? Math.floor(carryWordMinutes / remainingDays) : 0;
   let extraWordMinutes = remainingDays ? carryWordMinutes % remainingDays : 0;
 
@@ -149,7 +191,6 @@ function buildLecturePlan(courses, sessions = [], today = new Date()) {
     const actualByCourse = courses.map(course =>
       planSessions.filter(session => session.courseId === course.id && session.date === key).length
     );
-    const actualLectures = actualByCourse.reduce((sum, count) => sum + count, 0);
     const missedTasks = key < todayKeyValue
       ? day.tasks.map(({ course, count }) => ({
           course,
@@ -166,7 +207,7 @@ function buildLecturePlan(courses, sessions = [], today = new Date()) {
       : 0;
     return {
       ...day,
-      actualLectures,
+      actualLectures: actualByCourse.reduce((sum, count) => sum + count, 0),
       actualMinutes,
       missedLectures: missedTasks.reduce((sum, task) => sum + task.count, 0),
       missedTasks,
