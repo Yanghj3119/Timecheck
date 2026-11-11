@@ -113,9 +113,11 @@ function withDerivedProgress(data) {
   const sets = lectureDoneSets(courses, data.sessions || []);
   return { ...data, courses: courses.map(course => ({ ...course, completed: Math.min(Number(course.total), sets.get(course.id).size) })) };
 }
+// Catch-up sessions are real study time, but they belong to the missed day, not to today's plan.
+const isCatchupSession = (session) => /^\[catchup/.test(String(session.memo || '')) || String(session.memo || '').includes('미완료분 보충');
 const tabLabels = ['홈', '오늘의 시간표', '일정', '공부 기록', '학습 통계 및 진도', '설정'];
 const newestFirst = (a, b) => (Date.parse(b.at) || 0) - (Date.parse(a.at) || 0) || String(b.date).localeCompare(String(a.date));
-const cleanMemo = (memo) => String(memo || '').replace(/\[(?:lec:\d+|catchup:[^\]]*|extra)\]\s*/g, '').trim();
+const cleanMemo = (memo) => String(memo || '').replace(/\[(?:lec:\d+|catchup(?::[^\]]*)?|extra)\]\s*/g, '').trim();
 const nextUndoneLecture = (course, doneSet) => {
   for (let n = 1; n <= Number(course.total); n++) if (!doneSet.has(n)) return n;
   return null;
@@ -202,7 +204,7 @@ function buildLecturePlan(courses, sessions = [], today = new Date()) {
   return numberedDays.map(day => {
     const key = dateKey(day.date);
     const actualByCourse = courses.map(course =>
-      planSessions.filter(session => session.courseId === course.id && session.date === key).length
+      planSessions.filter(session => session.courseId === course.id && session.date === key && !isCatchupSession(session)).length
     );
     const missedTasks = key < todayKeyValue
       ? day.tasks.map(({ course, lectureNumbers }) => {
@@ -210,9 +212,9 @@ function buildLecturePlan(courses, sessions = [], today = new Date()) {
           return { course, count: missing.length, lectureNumbers: missing };
         }).filter(task => task.count)
       : [];
-    const actualMinutes = sessions.filter(session => session.date === key && session.kind !== '메모')
+    const actualMinutes = sessions.filter(session => session.date === key && session.kind !== '메모' && !isCatchupSession(session))
       .reduce((sum, session) => sum + Number(session.minutes), 0);
-    const vocabularyMinutes = sessions.filter(session => session.date === key && session.kind === '단어 암기')
+    const vocabularyMinutes = sessions.filter(session => session.date === key && session.kind === '단어 암기' && !isCatchupSession(session))
       .reduce((sum, session) => sum + Number(session.minutes), 0);
     // Missed study never changes later days: it only shows up in the catch-up list.
     const wordRecoveryMinutes = 0;
@@ -498,7 +500,7 @@ function App() {
     ...Object.entries(data.dailyGoals || {}).filter(([, v]) => v?.note).map(([date, v]) => ({ key: `legacy-${date}`, date, text: v.note, legacy: true })),
   ].sort((a, b) => String(b.date).localeCompare(String(a.date)) || String(b.at || '').localeCompare(String(a.at || ''))).slice(0, 30);
   const todayGoals = data.dailyGoals?.[todayKey()] || { tasks: [], note: '' };
-  const todayMinutes = sessionsToday.reduce((a, s) => a + Number(s.minutes), 0);
+  const todayMinutes = sessionsToday.filter(s => !isCatchupSession(s)).reduce((a, s) => a + Number(s.minutes), 0);
   const courseCompleted = data.courses.reduce((sum,c)=>sum+Number(c.completed),0);
   const courseTotal = data.courses.reduce((sum,c)=>sum+Number(c.total),0);
   const lecturePlan = useMemo(() => buildLecturePlan(data.courses, data.sessions), [data.courses, data.sessions]);
@@ -507,7 +509,7 @@ function App() {
   const isLectureDone = (courseId, number) => lectureDone.get(courseId)?.has(number) || false;
   const todayPlan = lecturePlan.find(day => dateKey(day.date) === todayKey());
   const futureLectureDays = lecturePlan.filter(day => dateKey(day.date) >= todayKey()).length;
-  const todayActualLectures = sessionsToday.filter(session => session.courseId && session.kind === '인강 시청').length;
+  const todayActualLectures = sessionsToday.filter(session => session.courseId && session.kind === '인강 시청' && !isCatchupSession(session)).length;
   const todayActualWords = sessionsToday.filter(session => session.kind === '단어 암기' && !String(session.memo || '').startsWith('[catchup:')).reduce((sum, session) => sum + Number(session.minutes), 0);
   const todayUnfinishedLectures = todayPlan ? todayPlan.tasks.reduce((sum, { course, lectureNumbers }) => sum + lectureNumbers.filter(n => !isLectureDone(course.id, n)).length, 0) : 0;
   const todayUnfinishedMinutes = todayPlan ? todayUnfinishedLectures * 60 + Math.max(0, todayPlan.wordMinutes - todayActualWords) : 0;
@@ -586,7 +588,7 @@ function App() {
     if (!lectureNumber || doneSet.has(lectureNumber) || Number(course.completed) >= Number(course.total)) return;
     const nextCourse = { ...course, completed: Number(course.completed) + 1 };
     const pastItem = studyBacklog.pending.find(item => item.type === 'lecture' && item.course.id === course.id && item.number === lectureNumber);
-    const memo = `[lec:${lectureNumber}] ${course.title} · ${lectureNumber}강 수강 완료${pastItem ? ' (미완료분 보충)' : ''}`;
+    const memo = `${pastItem ? '[catchup]' : ''}[lec:${lectureNumber}] ${course.title} · ${lectureNumber}강 수강 완료${pastItem ? ' (미완료분 보충)' : ''}`;
     const session = { subject: course.subject, kind: '인강 시청', courseId: course.id, minutes: 60, memo, date: todayKey(), at: new Date().toISOString() };
     save({ ...data, courses: data.courses.map(c => c.id === course.id ? nextCourse : c), sessions: [session, ...data.sessions] });
     setToast(pastItem ? `${course.title} ${lectureNumber}강 보충 완료 · 1시간 기록` : `${course.title} ${lectureNumber}강 완료 · 1시간 기록`);
