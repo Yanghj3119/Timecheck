@@ -352,3 +352,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 
 /* D-day */
 .dday-value{font-weight:800;color:#3f6150}
+
+/* 목표 시험 편집 */
+.exam-edit{padding:6px 10px;font-size:12px;white-space:nowrap}
+.exam-add-row{justify-content:flex-start}
