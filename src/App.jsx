@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { BookOpen, CalendarDays, ChartNoAxesColumn, Clock3, Coffee, Home, MapPin, Plus, Settings2, Sparkles, Target, Train, X, Check, ChevronLeft, ChevronRight, ArrowRight, BriefcaseBusiness, Cloud, CloudOff, LogOut } from 'lucide-react';
 import { supabase, supabaseConfigured } from './lib/supabase.js';
-import { addLocalIds, mergeStudyData, readRemoteData, writeRemoteData } from './lib/sync.js';
+import { addLocalIds, reconcileStudyData, readRemoteData, writeRemoteData } from './lib/sync.js';
 
 const subjects = ['영어', '국어', '행정법', '행정학'];
 const initialCourses = [
@@ -298,14 +298,27 @@ function App() {
   const [syncReady, setSyncReady] = useState(false);
   const [syncStatus, setSyncStatus] = useState(supabaseConfigured ? 'signed-out' : 'local-only');
   const authCallbackHandled = useRef(false);
+  const dataRef = useRef(data);
+  dataRef.current = data;
+  const changeCount = useRef(0);
+  const pulling = useRef(false);
+  const syncedRef = useRef(null);
+  if (syncedRef.current === null) {
+    try { syncedRef.current = new Set(JSON.parse(localStorage.getItem('pass-note-synced') || '[]')); } catch { syncedRef.current = new Set(); }
+  }
+  const markSynced = (sessions) => {
+    syncedRef.current = new Set(sessions.map(session => session.localId || session.at));
+    try { localStorage.setItem('pass-note-synced', JSON.stringify([...syncedRef.current])); } catch { /* Sync still works without the saved list. */ }
+  };
   const save = (next, removedSessionIds = []) => {
     const normalized = addLocalIds(withDerivedProgress(next));
+    changeCount.current += 1;
     setData(normalized);
     try { localStorage.setItem('pass-note', JSON.stringify(normalized)); } catch { /* Keep the in-memory copy when storage is unavailable. */ }
     if (supabase && authUser && syncReady) {
       setSyncStatus('syncing');
       writeRemoteData(supabase, authUser.id, normalized, removedSessionIds)
-        .then(() => setSyncStatus('synced'))
+        .then(() => { markSynced(normalized.sessions); setSyncStatus('synced'); })
         .catch(error => { setSyncStatus('error'); setAuthMessage(`동기화에 실패했어: ${error.message}`); });
     }
   };
@@ -369,10 +382,11 @@ function App() {
         const local = addLocalIds(load());
         const remote = await readRemoteData(supabase, authUser.id);
         remote.courses = remote.courses.filter(course => coreCourseIds.has(course.id));
-        const merged = withDerivedProgress(mergeStudyData(remote, local));
+        const merged = withDerivedProgress(reconcileStudyData(remote, local, syncedRef.current));
         localStorage.setItem('pass-note', JSON.stringify(merged));
         setData(merged);
         await writeRemoteData(supabase, authUser.id, merged);
+        markSynced(merged.sessions);
         if (active) { setSyncReady(true); setSyncStatus('synced'); setAuthMessage('이 기기의 기록을 계정과 동기화했어.'); }
       } catch (error) {
         if (active) { setSyncReady(false); setSyncStatus('error'); setAuthMessage(`연결에 실패했어: ${error.message} · Supabase SQL 적용 여부를 확인해줘.`); }
@@ -380,6 +394,44 @@ function App() {
     })();
     return () => { active = false; };
   }, [authUser?.id]);
+
+  // Keep this device up to date with changes made on other devices.
+  useEffect(() => {
+    if (!supabase || !authUser || !syncReady) return undefined;
+    let active = true;
+    const pull = async () => {
+      if (!active || pulling.current || document.visibilityState === 'hidden') return;
+      pulling.current = true;
+      const before = changeCount.current;
+      try {
+        const remote = await readRemoteData(supabase, authUser.id);
+        remote.courses = remote.courses.filter(course => coreCourseIds.has(course.id));
+        // Skip if the user saved something while we were reading; the next pull will catch up.
+        if (!active || changeCount.current !== before) return;
+        const local = dataRef.current;
+        const merged = withDerivedProgress(reconcileStudyData(remote, local, syncedRef.current));
+        const signature = (value) => value.sessions.map(session => session.localId).sort().join('|') + '#' + value.courses.map(course => `${course.id}:${course.completed}`).join(',');
+        if (signature(merged) !== signature(local)) {
+          try { localStorage.setItem('pass-note', JSON.stringify(merged)); } catch { /* Keep the in-memory copy. */ }
+          setData(merged);
+        }
+        const remoteIds = new Set(remote.sessions.map(session => session.localId));
+        if (merged.sessions.some(session => Number(session.minutes) > 0 && !remoteIds.has(session.localId))) {
+          await writeRemoteData(supabase, authUser.id, merged);
+        }
+        markSynced(merged.sessions);
+        setSyncStatus('synced');
+      } catch (error) {
+        setSyncStatus('error');
+        setAuthMessage(`다른 기기의 기록을 불러오지 못했어: ${error.message}`);
+      } finally { pulling.current = false; }
+    };
+    const timer = setInterval(pull, 15000);
+    window.addEventListener('focus', pull);
+    document.addEventListener('visibilitychange', pull);
+    window.addEventListener('online', pull);
+    return () => { active = false; clearInterval(timer); window.removeEventListener('focus', pull); document.removeEventListener('visibilitychange', pull); window.removeEventListener('online', pull); };
+  }, [authUser?.id, syncReady]);
 
   const signInWithPassword = async (event) => {
     event.preventDefault();

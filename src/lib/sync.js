@@ -74,8 +74,18 @@ export function mergeStudyData(remote, local) {
   };
 }
 
+// Merge the server copy with this device's copy. A session that this device already
+// uploaded earlier but that is now missing on the server was deleted on another device,
+// so it is dropped instead of being uploaded again.
+export function reconcileStudyData(remote, local, syncedIds = new Set()) {
+  const remoteIds = new Set(remote.sessions.map(session => session.localId));
+  const keptSessions = local.sessions.filter(session => !syncedIds.has(session.localId) || remoteIds.has(session.localId));
+  return mergeStudyData(remote, { ...local, sessions: keptSessions });
+}
+
 export async function writeRemoteData(client, userId, data, removedSessionIds = []) {
-  const sessions = data.sessions.map(session => ({
+  // The database only accepts sessions longer than 0 minutes.
+  const sessions = data.sessions.filter(session => Number(session.minutes) > 0).map(session => ({
     user_id: userId,
     local_id: session.localId || session.at,
     course_key: session.courseId || null,
