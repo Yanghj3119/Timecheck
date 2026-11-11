@@ -326,3 +326,9 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .sidebar-toggle:hover { background: #edf2ee; color: #3f5e4b; }
 .header-brand { gap: 7px; }
 @media (max-width: 760px) { .header-brand-group { gap: 3px; } .sidebar-toggle { min-height: 34px; padding-inline: 6px; } }
+
+/* 공부 기록 목록 내부 스크롤 */
+.full-record-list{max-height:min(60vh,520px);overflow-y:auto;overscroll-behavior:contain;padding-right:6px;scrollbar-width:thin}
+.catchup-list{max-height:min(46vh,420px);overflow-y:auto;overscroll-behavior:contain;padding-right:6px;scrollbar-width:thin}
+.full-record-list::-webkit-scrollbar,.catchup-list::-webkit-scrollbar{width:8px}
+.full-record-list::-webkit-scrollbar-thumb,.catchup-list::-webkit-scrollbar-thumb{background:#c9d1cc;border-radius:8px}
