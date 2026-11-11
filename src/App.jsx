@@ -317,7 +317,7 @@ function App() {
     try { localStorage.setItem('pass-note', JSON.stringify(normalized)); } catch { /* Keep the in-memory copy when storage is unavailable. */ }
     if (supabase && authUser && syncReady) {
       setSyncStatus('syncing');
-      writeRemoteData(supabase, authUser.id, normalized, removedSessionIds)
+      writeRemoteData(supabase, authUser.id, normalized, removedSessionIds, syncedRef.current)
         .then(() => { markSynced(normalized.sessions); setSyncStatus('synced'); })
         .catch(error => { setSyncStatus('error'); setAuthMessage(`동기화에 실패했어: ${error.message}`); });
     }
@@ -385,7 +385,7 @@ function App() {
         const merged = withDerivedProgress(reconcileStudyData(remote, local, syncedRef.current));
         localStorage.setItem('pass-note', JSON.stringify(merged));
         setData(merged);
-        await writeRemoteData(supabase, authUser.id, merged);
+        await writeRemoteData(supabase, authUser.id, merged, [], new Set(remote.sessions.map(session => session.localId)));
         markSynced(merged.sessions);
         if (active) { setSyncReady(true); setSyncStatus('synced'); setAuthMessage('이 기기의 기록을 계정과 동기화했어.'); }
       } catch (error) {
@@ -417,7 +417,7 @@ function App() {
         }
         const remoteIds = new Set(remote.sessions.map(session => session.localId));
         if (merged.sessions.some(session => Number(session.minutes) > 0 && !remoteIds.has(session.localId))) {
-          await writeRemoteData(supabase, authUser.id, merged);
+          await writeRemoteData(supabase, authUser.id, merged, [], remoteIds);
         }
         markSynced(merged.sessions);
         setSyncStatus('synced');

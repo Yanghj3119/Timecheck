@@ -83,9 +83,11 @@ export function reconcileStudyData(remote, local, syncedIds = new Set()) {
   return mergeStudyData(remote, { ...local, sessions: keptSessions });
 }
 
-export async function writeRemoteData(client, userId, data, removedSessionIds = []) {
+// skipSessionIds: sessions already on the server. They are not uploaded again, so a device
+// with an out-of-date copy can never bring back a record that was deleted elsewhere.
+export async function writeRemoteData(client, userId, data, removedSessionIds = [], skipSessionIds = new Set()) {
   // The database only accepts sessions longer than 0 minutes.
-  const sessions = data.sessions.filter(session => Number(session.minutes) > 0).map(session => ({
+  const sessions = data.sessions.filter(session => Number(session.minutes) > 0 && !skipSessionIds.has(session.localId || session.at)).map(session => ({
     user_id: userId,
     local_id: session.localId || session.at,
     course_key: session.courseId || null,
