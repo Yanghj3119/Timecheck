@@ -6,3 +6,32 @@
 .lecture-total{text-align:right;background:#edf2ed;border-radius:9px;padding:10px 13px;color:#607a69}.lecture-total>b{display:block;font-size:17px}.lecture-total>b small{font-size:10px;color:#95a197}.lecture-total>span{display:block;font-size:8px;margin-top:3px;color:#829084}.course-subject-tabs{display:flex;gap:8px;margin:-8px 0 13px}.course-subject-tabs span{font-size:8px;padding:6px 9px;background:#eeeee9;border-radius:6px;color:#84867e}.course-group{padding:0 18px;margin-bottom:11px}.course-group-head{display:flex;align-items:center;gap:9px;padding:13px 0;border-bottom:1px solid #efeee9}.course-group-head>div{display:flex;align-items:center;gap:8px}.course-group-head b{font-size:11px}.course-group-head small{font-size:8px;color:#a0a199}.course-row{display:grid;grid-template-columns:1fr 92px 112px;align-items:center;gap:14px;padding:12px 0;border-bottom:1px solid #f1f0ec}.course-row:last-child{border-bottom:0}.course-name{display:flex;align-items:center;gap:7px}.course-name>b{font-size:9px;font-weight:600}.complete-tag{font-size:7px;background:#e8664d;color:#fff;padding:2px 5px;border-radius:3px}.course-progress{height:4px;background:#f0f0ed;border-radius:8px;margin-top:8px;overflow:hidden}.course-progress i{display:block;height:100%;border-radius:8px;background:#ec744f}.course-count{text-align:right}.course-count>b{display:block;font-size:10px}.course-count>small{font-size:8px;color:#ef7754}.course-actions{display:flex;justify-content:flex-end}.lecture-complete{border:1px solid #e7ebe5;background:#f8faf8;color:#607b68;border-radius:7px;padding:7px 9px;display:flex;align-items:center;gap:4px;font-size:8px;font-weight:600;white-space:nowrap}.lecture-complete:hover:not(:disabled){background:#eaf0ea}.lecture-complete:disabled{opacity:.45;cursor:default}
 .shift-notice{display:flex;align-items:center;gap:8px;color:#826b50;background:#faf6ef;border:1px solid #f1eadf;padding:9px 12px;border-radius:9px;margin:-5px 0 13px;font-size:9px}.shift-notice svg{flex-shrink:0}.shift-notice b{color:#6e5b43}
 @media(max-width:760px){.page-title-row{align-items:flex-start;gap:10px}.page-title-row .lecture-total{margin-top:18px;padding:8px 9px;flex-shrink:0}.lecture-total>b{font-size:14px}.course-group{padding:0 12px}.course-row{grid-template-columns:minmax(0,1fr) 56px;gap:7px;padding:12px 0}.course-name>b{font-size:8px;line-height:1.5}.course-count>b{font-size:9px}.course-count>small{font-size:7px}.course-actions{grid-column:1 / -1;justify-content:stretch}.lecture-complete{width:100%;justify-content:center;padding:9px;font-size:9px}.course-subject-tabs{margin-top:-6px}.course-group-head{padding:11px 0}.course-group-head>div{display:grid;gap:2px}.course-group-head b{font-size:10px}}
+
+.daily-goals-panel { margin-top: 14px; }
+.daily-goal-progress { height: 7px; margin: 12px 0; overflow: hidden; border-radius: 20px; background: #edf0eb; }
+.daily-goal-progress i { display: block; height: 100%; border-radius: inherit; background: #779681; transition: width .2s ease; }
+.daily-goal-help, .daily-goal-foot { color: #777d73; font-size: 12px; line-height: 1.6; }
+.daily-goal-list { display: grid; gap: 7px; margin: 12px 0; }
+.daily-goal-item { width: 100%; display: flex; align-items: center; gap: 11px; padding: 12px; border: 1px solid #ecefe9; border-radius: 11px; background: #fff; color: #41483f; text-align: left; }
+.daily-goal-item:disabled { cursor: default; opacity: 1; }
+.daily-goal-item.done { background: #f5f8f4; border-color: #e0e9df; }
+.daily-goal-item > span:last-child { min-width: 0; display: grid; gap: 4px; }
+.daily-goal-item b { font-size: 13px; font-weight: 700; }
+.daily-goal-item small { color: #7c8279; font-size: 11px; line-height: 1.45; }
+.daily-goal-check { width: 23px; height: 23px; flex: 0 0 23px; display: grid; place-items: center; border: 1.5px solid #cbd5c9; border-radius: 7px; color: #fff; }
+.daily-goal-item.done .daily-goal-check { border-color: #779681; background: #779681; }
+.daily-goal-add { display: flex; gap: 8px; margin: 12px 0; }
+.daily-goal-add input { min-width: 0; flex: 1; padding: 10px 12px; border: 1px solid #e4e8e1; border-radius: 9px; background: #fff; color: #3d443b; font: inherit; font-size: 12px; }
+.daily-goal-add .export-button { flex: 0 0 auto; white-space: nowrap; }
+.daily-goal-note { display: grid; gap: 7px; margin-top: 14px; color: #596359; font-size: 12px; font-weight: 700; }
+.daily-goal-note textarea { width: 100%; min-height: 78px; padding: 11px 12px; resize: vertical; border: 1px solid #e4e8e1; border-radius: 9px; background: #fff; color: #3d443b; font: inherit; font-size: 12px; line-height: 1.5; }
+.daily-goal-save { margin-top: 8px; }
+.daily-goal-foot { margin-top: 10px; }
+@media (max-width: 760px) {
+  .daily-goals-panel { padding: 14px; }
+  .daily-goal-help, .daily-goal-foot { font-size: 11px; }
+  .daily-goal-item { padding: 10px; gap: 9px; }
+  .daily-goal-item b { font-size: 12px; }
+  .daily-goal-add { align-items: stretch; }
+  .daily-goal-add .export-button { padding-inline: 9px; font-size: 11px; }
+}
