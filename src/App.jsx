@@ -381,14 +381,14 @@ function App() {
   const todayGoalLectureTasks = (todayPlan?.tasks || []).flatMap(({ course, count }) =>
     Array.from({ length: count }, (_, index) => ({ course, index, key: `lecture:${course.id}:${index + 1}` }))
   );
-  const todayGoalCompleted = todayGoalLectureTasks.reduce((sum, task) =>
-    sum + (todayActualLecturesByCourse[task.course.id] > task.index ? 1 : 0), 0
-  ) + (todayGoals.tasks || []).filter(task => task.done).length;
-  const todayGoalTotal = todayGoalLectureTasks.length + (todayGoals.tasks || []).length;
   const todayActualLecturesByCourse = Object.fromEntries(data.courses.map(course => [
     course.id,
     sessionsToday.filter(session => session.courseId === course.id && session.kind === '인강 시청').length,
   ]));
+  const todayGoalCompleted = todayGoalLectureTasks.reduce((sum, task) =>
+    sum + (todayActualLecturesByCourse[task.course.id] > task.index ? 1 : 0), 0
+  ) + (todayGoals.tasks || []).filter(task => task.done).length;
+  const todayGoalTotal = todayGoalLectureTasks.length + (todayGoals.tasks || []).length;
   const weekStart = useMemo(() => { const d = studyDate(weekShift * 7); d.setDate(d.getDate() - (d.getDay() + 6) % 7); d.setHours(0, 0, 0, 0); return d; }, [weekShift]);
   const weekDates = Array.from({ length: 7 }, (_, i) => { const d = new Date(weekStart); d.setDate(d.getDate() + i); return d; });
   const weekSessions = data.sessions.filter((s) => s.date >= dateKey(weekDates[0]) && s.date <= dateKey(weekDates[6]));
