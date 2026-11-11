@@ -57,9 +57,17 @@ export function mergeStudyData(remote, local) {
     const remoteCourse = remoteCourses.get(id);
     if (!localCourse) return remoteCourse;
     if (!remoteCourse) return localCourse;
-    return { ...remoteCourse, ...localCourse, completed: Math.max(Number(remoteCourse.completed), Number(localCourse.completed)) };
+    return {
+      ...remoteCourse,
+      ...localCourse,
+      completed: Number(local.progressRevision || 0) >= 2
+        ? Number(localCourse.completed)
+        : Math.max(Number(remoteCourse.completed), Number(localCourse.completed)),
+    };
   });
   return {
+    ...remote,
+    ...local,
     courses,
     sessions: mergeByLocalId(remote.sessions, local.sessions),
     trips: mergeByLocalId(remote.trips, local.trips),
