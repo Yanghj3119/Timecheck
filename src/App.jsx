@@ -113,6 +113,7 @@ function withDerivedProgress(data) {
   const sets = lectureDoneSets(courses, data.sessions || []);
   return { ...data, courses: courses.map(course => ({ ...course, completed: Math.min(Number(course.total), sets.get(course.id).size) })) };
 }
+const newestFirst = (a, b) => (Date.parse(b.at) || 0) - (Date.parse(a.at) || 0) || String(b.date).localeCompare(String(a.date));
 const cleanMemo = (memo) => String(memo || '').replace(/\[(?:lec:\d+|catchup:[^\]]*|extra)\]\s*/g, '').trim();
 const nextUndoneLecture = (course, doneSet) => {
   for (let n = 1; n <= Number(course.total); n++) if (!doneSet.has(n)) return n;
@@ -487,7 +488,7 @@ function App() {
   };
   const signOut = async () => { await supabase?.auth.signOut(); setAuthMessage('로그아웃했어. 기록은 이 기기에 남아 있어.'); };
   const sessionsToday = data.sessions.filter((s) => s.date === todayKey() && s.kind !== '메모');
-  const extraSessionsToday = sessionsToday.filter(s => String(s.memo || '').startsWith('[extra]'));
+  const extraSessionsToday = sessionsToday.filter(s => String(s.memo || '').startsWith('[extra]')).sort(newestFirst);
   const savedMemos = [
     ...data.sessions.filter(s => s.kind === '메모').map(s => ({ key: s.at, date: s.date, text: cleanMemo(s.memo), at: s.at })),
     ...Object.entries(data.dailyGoals || {}).filter(([, v]) => v?.note).map(([date, v]) => ({ key: `legacy-${date}`, date, text: v.note, legacy: true })),
@@ -503,7 +504,7 @@ function App() {
   const todayPlan = lecturePlan.find(day => dateKey(day.date) === todayKey());
   const futureLectureDays = lecturePlan.filter(day => dateKey(day.date) >= todayKey()).length;
   const todayActualLectures = sessionsToday.filter(session => session.courseId && session.kind === '인강 시청').length;
-  const todayActualWords = sessionsToday.filter(session => session.kind === '단어 암기').reduce((sum, session) => sum + Number(session.minutes), 0);
+  const todayActualWords = sessionsToday.filter(session => session.kind === '단어 암기' && !String(session.memo || '').startsWith('[catchup:')).reduce((sum, session) => sum + Number(session.minutes), 0);
   const todayUnfinishedLectures = todayPlan ? todayPlan.tasks.reduce((sum, { course, lectureNumbers }) => sum + lectureNumbers.filter(n => !isLectureDone(course.id, n)).length, 0) : 0;
   const todayUnfinishedMinutes = todayPlan ? todayUnfinishedLectures * 60 + Math.max(0, todayPlan.wordMinutes - todayActualWords) : 0;
   const todayActualLecturesByCourse = Object.fromEntries(data.courses.map(course => [course.id, sessionsToday.filter(session => session.courseId === course.id && session.kind === '인강 시청').length]));
@@ -515,7 +516,7 @@ function App() {
   const todayStudyTotal = todayGoalLectureTasks.length + 1;
   const todayStudyDone = todayGoalLectureTasks.filter(task => isLectureDone(task.course.id, task.lectureNumber)).length + (todayWordsDone ? 1 : 0);  const weekStart = useMemo(() => { const d = studyDate(weekShift * 7); d.setDate(d.getDate() - (d.getDay() + 6) % 7); d.setHours(0, 0, 0, 0); return d; }, [weekShift]);
   const weekDates = Array.from({ length: 7 }, (_, i) => { const d = new Date(weekStart); d.setDate(d.getDate() + i); return d; });
-  const weekSessions = data.sessions.filter((s) => s.kind !== '메모' && s.date >= dateKey(weekDates[0]) && s.date <= dateKey(weekDates[6]));
+  const weekSessions = data.sessions.filter((s) => s.kind !== '메모' && s.date >= dateKey(weekDates[0]) && s.date <= dateKey(weekDates[6])).sort(newestFirst);
   const weekMinutes = weekSessions.reduce((a, s) => a + Number(s.minutes), 0);
   const weekTargetHours = weekDates.reduce((sum, d) => sum + dayTarget(d, lecturePlan), 0);
   const weekTargetMinutes = weekTargetHours * 60;
@@ -606,6 +607,31 @@ function App() {
     save({ ...data, sessions: [session, ...data.sessions] });
     setToast(`영단어 ${fmtMinutes(minutes)} 완료로 기록했어`);
     setTimeout(() => setToast(''), 2600);
+  };  const removeSessions = (ats) => {
+    const removed = data.sessions.filter(session => ats.includes(session.at));
+    if (!removed.length) return false;
+    save({ ...data, sessions: data.sessions.filter(session => !ats.includes(session.at)) }, removed.map(session => session.localId || session.at));
+    return true;
+  };
+  const undoLecture = (course, number) => {
+    const own = data.sessions.filter(session => session.courseId === course.id && session.kind === '인강 시청');
+    const numbered = own.filter(session => Number((String(session.memo || '').match(lectureMarkerPattern) || [])[1]) === number).sort(newestFirst)[0];
+    const todayUnnumbered = own.filter(session => session.date === todayKey() && !lectureMarkerPattern.test(String(session.memo || ''))).sort(newestFirst)[0];
+    const target = numbered || todayUnnumbered;
+    if (target && removeSessions([target.at])) setToast(`${course.subject} ${number}강 완료를 취소했어`);
+    else setToast('이전에 끝낸 강의라 여기서는 취소할 수 없어');
+    setTimeout(() => setToast(''), 2600);
+  };
+  const undoWords = () => {
+    let total = todayActualWords;
+    const removeAts = [];
+    for (const session of sessionsToday.filter(s => s.kind === '단어 암기' && !String(s.memo || '').startsWith('[catchup:')).sort(newestFirst)) {
+      if (total < wordPlanMinutes) break;
+      removeAts.push(session.at);
+      total -= Number(session.minutes);
+    }
+    if (removeSessions(removeAts)) setToast('영단어 완료를 취소했어');
+    setTimeout(() => setToast(''), 2600);
   };  const removeSession = (at) => { const removed = data.sessions.find((s) => s.at === at); const courses = removed?.courseId ? data.courses.map(c => c.id === removed.courseId ? { ...c, completed: Math.max(0, c.completed - 1) } : c) : data.courses; save({ ...data, courses, sessions: data.sessions.filter((s) => s.at !== at) }, removed ? [removed.localId || removed.at] : []); };
   const menu = [{ label: '홈', icon: Home }, { label: '오늘의 시간표', icon: CalendarDays }, { label: '일정', icon: CalendarDays }, { label: '공부 기록', icon: Clock3 }, { label: '학습 통계 및 진도', icon: ChartNoAxesColumn }, { label: '설정', icon: Settings2 }];
   return <div className="app-shell">
@@ -621,7 +647,7 @@ function App() {
 {tab === '오늘의 시간표' && <>
 <div className="page-title"><div className="eyebrow">TODAY'S TIMETABLE</div><h1>오늘의 시간표</h1><p>실제 수강할 과목과 강의 번호를 확인하고, 완료하면 바로 체크해줘.</p></div>
 <section className="panel today-timetable-panel"><div className="panel-heading"><div><div className="eyebrow">TODAY'S PLAN</div><h2>시간대별 일정</h2></div><span className="record-count">{todayPlan?.goal||0}강 계획</span></div><div className="schedule-list">{todaySchedule(new Date(),lecturePlan).map((item,i)=><div className={`schedule-row ${item.type}`} key={i}><div className="time-col">{item.time}</div><div className="timeline"><i/></div><div className="schedule-info"><div className="schedule-title">{item.title}</div><small>{item.sub}</small></div>{item.type==='work'?<BriefcaseBusiness size={16}/>:item.type==='study'?<span className="subject-pill">{item.subject}</span>:<Coffee size={16}/>}</div>)}</div></section>
-<section className="panel today-lecture-check-panel"><div className="panel-heading"><div><div className="eyebrow">TODAY'S STUDY</div><h2>오늘 해야 할 학습</h2></div><span className="record-count">{todayStudyDone}/{todayStudyTotal} 완료</span></div><div className="daily-goal-progress"><i style={{width:`${todayStudyTotal?todayStudyDone/todayStudyTotal*100:0}%`}}/></div><p className="daily-goal-help">완료를 누르면 실제 진도와 공부 기록에 바로 반영돼. 못 한 학습은 내일 일정을 바꾸지 않고 공부 기록의 미완료 공부에 쌓여.</p><div className="daily-goal-list"><button type="button" className={`daily-goal-item ${todayWordsDone?'done':''}`} disabled={todayWordsDone} onClick={completeWords}><span className="daily-goal-check">{todayWordsDone&&<Check size={15}/>}</span><span><b>영어 · 영단어 암기</b><small>{fmtMinutes(wordPlanMinutes)}{todayActualWords>0&&!todayWordsDone?` · ${fmtMinutes(todayActualWords)} 기록됨`:''}</small></span></button>{todayGoalLectureTasks.map(task=>{const checked=isLectureDone(task.course.id,task.lectureNumber);return <button type="button" className={`daily-goal-item ${checked?'done':''}`} key={task.key} disabled={checked} onClick={()=>completeLecture(data.courses.find(c=>c.id===task.course.id),task.lectureNumber)}><span className="daily-goal-check">{checked&&<Check size={15}/>}</span><span><b>{task.course.subject} · {task.lectureNumber}강</b><small>{task.course.title.replace(/^\[\d+\]\s*/, '')}</small></span></button>})}</div></section>
+<section className="panel today-lecture-check-panel"><div className="panel-heading"><div><div className="eyebrow">TODAY'S STUDY</div><h2>오늘 해야 할 학습</h2></div><span className="record-count">{todayStudyDone}/{todayStudyTotal} 완료</span></div><div className="daily-goal-progress"><i style={{width:`${todayStudyTotal?todayStudyDone/todayStudyTotal*100:0}%`}}/></div><p className="daily-goal-help">완료를 누르면 실제 진도와 공부 기록에 바로 반영되고, 완료한 항목을 다시 누르면 취소돼. 못 한 학습은 내일 일정을 바꾸지 않고 공부 기록의 미완료 공부에 쌓여.</p><div className="daily-goal-list"><button type="button" className={`daily-goal-item ${todayWordsDone?'done':''}`} onClick={todayWordsDone?undoWords:completeWords}><span className="daily-goal-check">{todayWordsDone&&<Check size={15}/>}</span><span><b>영어 · 영단어 암기</b><small>{fmtMinutes(wordPlanMinutes)}{todayActualWords>0&&!todayWordsDone?` · ${fmtMinutes(todayActualWords)} 기록됨`:''}</small></span></button>{todayGoalLectureTasks.map(task=>{const checked=isLectureDone(task.course.id,task.lectureNumber);return <button type="button" className={`daily-goal-item ${checked?'done':''}`} key={task.key} onClick={()=>{const course=data.courses.find(c=>c.id===task.course.id);checked?undoLecture(course,task.lectureNumber):completeLecture(course,task.lectureNumber)}}><span className="daily-goal-check">{checked&&<Check size={15}/>}</span><span><b>{task.course.subject} · {task.lectureNumber}강</b><small>{task.course.title.replace(/^\[\d+\]\s*/, '')}</small></span></button>})}</div></section>
 </>}
 {tab === '일정' && <>
 <div className="page-title"><div className="eyebrow">SCHEDULE</div><h1>일정</h1><p>이번 주 일정과 강의 번호, 기본이론 완강 일정을 한눈에 확인해.</p></div>
