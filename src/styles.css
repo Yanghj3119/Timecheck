@@ -35,3 +35,11 @@
   .daily-goal-add { align-items: stretch; }
   .daily-goal-add .export-button { padding-inline: 9px; font-size: 11px; }
 }
+
+/* Dedicated navigation destinations and compact home */
+.home-progress-panel{margin-bottom:14px}.home-progress-panel>summary{list-style:none;cursor:pointer}.home-progress-panel>summary::-webkit-details-marker{display:none}
+.home-shortcuts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:14px}
+.home-shortcuts button{display:grid;grid-template-columns:24px 1fr;align-items:center;gap:5px 9px;text-align:left;color:#607b6c;cursor:pointer}
+.home-shortcuts button b{color:#41483f;font-size:12px}.home-shortcuts button small{grid-column:2;color:#8a9086;font-size:10px}
+.today-timetable-panel,.today-lecture-check-panel{margin-bottom:14px}.today-timetable-panel .schedule-row{min-height:58px}.today-lecture-check-panel .daily-goal-list{margin-top:14px}
+@media(max-width:760px){.home-shortcuts{grid-template-columns:1fr 1fr;gap:8px}.home-shortcuts button{padding:13px}.home-shortcuts button b{font-size:11px}.home-shortcuts button small{font-size:9px;line-height:1.4}.mobile-nav{overflow-x:auto;justify-content:flex-start}.mobile-nav button{flex:1 0 58px}}
