@@ -332,3 +332,13 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .catchup-list{max-height:min(46vh,420px);overflow-y:auto;overscroll-behavior:contain;padding-right:6px;scrollbar-width:thin}
 .full-record-list::-webkit-scrollbar,.catchup-list::-webkit-scrollbar{width:8px}
 .full-record-list::-webkit-scrollbar-thumb,.catchup-list::-webkit-scrollbar-thumb{background:#c9d1cc;border-radius:8px}
+
+/* 일정: 요일 카드 접기 */
+.weekly-day-card>summary{list-style:none;cursor:pointer;display:flex;align-items:center;justify-content:space-between;gap:12px}
+.weekly-day-card>summary::-webkit-details-marker{display:none}
+.weekly-day-card>summary::after{content:'▾';margin-left:8px;color:#8a948f;transition:transform .15s}
+.weekly-day-card:not([open])>summary::after{transform:rotate(-90deg)}
+.weekly-day-card:not([open]) .weekly-day-progress{display:none}
+.weekly-day-card[open]>summary{margin-bottom:12px}
+.weekly-day-card .weekly-agenda-list{max-height:min(48vh,380px);overflow-y:auto;overscroll-behavior:contain;scrollbar-width:thin}
+@media (min-width:900px){.weekly-agenda-grid{grid-template-columns:repeat(2,minmax(0,1fr));align-items:start}}
