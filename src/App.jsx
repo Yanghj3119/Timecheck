@@ -113,6 +113,7 @@ function withDerivedProgress(data) {
   const sets = lectureDoneSets(courses, data.sessions || []);
   return { ...data, courses: courses.map(course => ({ ...course, completed: Math.min(Number(course.total), sets.get(course.id).size) })) };
 }
+const tabLabels = ['홈', '오늘의 시간표', '일정', '공부 기록', '학습 통계 및 진도', '설정'];
 const newestFirst = (a, b) => (Date.parse(b.at) || 0) - (Date.parse(a.at) || 0) || String(b.date).localeCompare(String(a.date));
 const cleanMemo = (memo) => String(memo || '').replace(/\[(?:lec:\d+|catchup:[^\]]*|extra)\]\s*/g, '').trim();
 const nextUndoneLecture = (course, doneSet) => {
@@ -280,7 +281,10 @@ function App() {
     try { localStorage.setItem('pass-note', JSON.stringify(initial)); } catch { /* Keep the in-memory copy when storage is unavailable. */ }
     return initial;
   });
-  const [tab, setTab] = useState('홈');
+  const [tab, setTab] = useState(() => {
+    try { const saved = localStorage.getItem('pass-note-tab'); return tabLabels.includes(saved) ? saved : '홈'; } catch { return '홈'; }
+  });
+  useEffect(() => { try { localStorage.setItem('pass-note-tab', tab); } catch { /* Remembering the tab is optional. */ } }, [tab]);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [modal, setModal] = useState('');
   const [weekShift, setWeekShift] = useState(0);
