@@ -49,7 +49,27 @@ const lecturePlanDays = 28;
 const lecturePlanEnd = '2026-12-08';
 const noStudyDates = new Set(['2026-12-09', '2026-12-10']);
 
-function allocateLectureDays(courses, remaining, dates) {
+// How many lectures each day can hold, as a share (largest-remainder rounding).
+function quotasByWeight(total, weights) {
+  const sum = weights.reduce((a, w) => a + w, 0);
+  if (!sum) return weights.map(() => 0);
+  const raw = weights.map(w => total * w / sum);
+  const quotas = raw.map(Math.floor);
+  let left = total - quotas.reduce((a, q) => a + q, 0);
+  raw.map((value, i) => [value - quotas[i], i]).sort((a, b) => b[0] - a[0] || a[1] - b[1]).forEach(([, i]) => { if (left > 0 && weights[i] > 0) { quotas[i]++; left--; } });
+  return quotas;
+}
+// Study capacity per day: part-time work in the evening (Mon–Wed 20:00–24:00) or on 11/20
+// afternoon leaves less time for lectures than a free day.
+const lectureDayWeight = (date) => {
+  const key = dateKey(date);
+  if (noStudyDates.has(key)) return 0;
+  if (key === '2026-11-20') return 0.5;
+  if (key === '2026-11-12' || key === '2026-11-13' || [1, 2, 3].includes(date.getDay())) return 0.7;
+  return 1;
+};
+
+function allocateLectureDays(courses, remaining, dates, weightFn = null) {
   const total = remaining.reduce((sum, count) => sum + count, 0);
   if (!dates.length) return [];
   const lighterIndexes = dates.map((date, i) => dateKey(date) === '2026-11-20' ? i : -1).filter(i => i >= 0);
@@ -60,12 +80,13 @@ function allocateLectureDays(courses, remaining, dates) {
   const base = flexibleDays ? Math.floor(flexibleTotal / flexibleDays) : 0;
   const extra = flexibleDays ? flexibleTotal % flexibleDays : 0;
   let flexibleIndex = 0;
-  const quotas = dates.map((_, dayIndex) => {
+  let quotas = dates.map((_, dayIndex) => {
     if (fixed.has(dayIndex)) return fixed.get(dayIndex);
     const quota = base + (Math.floor((flexibleIndex + 1) * extra / Math.max(1, flexibleDays)) > Math.floor(flexibleIndex * extra / Math.max(1, flexibleDays)) ? 1 : 0);
     flexibleIndex++;
     return quota;
   });
+  if (weightFn) quotas = quotasByWeight(total, dates.map(weightFn));
   const assigned = courses.map(() => 0);
   let slot = 0;
   return dates.map((date, dayIndex) => {
@@ -154,7 +175,7 @@ const isPseudoSession = (session) => session.kind === '메모' || session.kind =
 // "Replan from what is left": the newest 계획 record says from which day, and at which
 // moment, the remaining lectures were spread again over the days up to the end date.
 const latestRebase = (sessions) => sessions.filter(s => s.kind === '계획').map(s => {
-  try { const value = JSON.parse(s.memo); return value && value.date && value.at ? { date: value.date, at: value.at, atMs: Date.parse(value.at) || 0 } : null; } catch { return null; }
+  try { const value = JSON.parse(s.memo); return value && value.date && value.at ? { date: value.date, from: value.from || value.date, at: value.at, atMs: Date.parse(value.at) || 0 } : null; } catch { return null; }
 }).filter(Boolean).sort((a, b) => b.atMs - a.atMs)[0] || null;
 const parseExam = (session) => { try { const exam = JSON.parse(session.memo); return exam && exam.name && !exam.empty ? exam : null; } catch { return null; } };
 const tabLabels = ['홈', '오늘의 시간표', '일정', '공부 기록', '학습 통계 및 진도', '설정'];
@@ -251,8 +272,8 @@ function buildLecturePlan(courses, sessions = [], today = new Date()) {
   if (rebase && rebase.date <= lecturePlanEnd) {
     const doneAtRebase = lectureDoneSets(courses, sessions.filter(session => (Date.parse(session.at) || 0) < rebase.atMs));
     const candidates = new Map(courses.map(course => [course.id, Array.from({ length: Number(course.total) }, (_, i) => i + 1).filter(n => !doneAtRebase.get(course.id).has(n))]));
-    const rebaseDates = dates.filter(date => dateKey(date) >= rebase.date);
-    const allocated = allocateLectureDays(courses, courses.map(course => candidates.get(course.id).length), rebaseDates);
+    const rebaseDates = dates.filter(date => dateKey(date) >= (rebase.from || rebase.date));
+    const allocated = allocateLectureDays(courses, courses.map(course => candidates.get(course.id).length), rebaseDates, lectureDayWeight);
     const pointer = new Map(courses.map(course => [course.id, 0]));
     const rebuilt = new Map(allocated.map(day => {
       const key = dateKey(day.date);
@@ -745,10 +766,12 @@ function App() {
   const deleteExam = (exam) => { commitExams(examList.filter(e => e.id !== exam.id)); };
   const openExamForm = (exam) => { setExamForm(exam ? { id: exam.id, name: exam.name, track: exam.track || '', date: exam.date || '' } : { id: '', name: '', track: '일반행정', date: '' }); setModal('exam'); };
   const activeRebase = latestRebase(data.sessions);
-  const startReplan = () => {
-    if (!window.confirm('오늘부터 12월 8일까지, 아직 못 들은 모든 강의(미완료 포함)를 날짜별로 다시 나눌까요?\n지난 날짜의 미완료 강의는 새 일정에 포함돼요.')) return;
+  const startReplan = (skipToday = false) => {
+    const from = skipToday ? dateKey(studyDate(1)) : todayKey();
+    const startText = skipToday ? '오늘은 영단어만 남기고 내일부터' : '오늘부터';
+    if (!window.confirm(`${startText} 12월 8일까지, 아직 못 들은 모든 강의(미완료 포함)를 날짜별로 다시 나눌까요?\n알바가 있는 날(월~수 저녁, 11/20 오후)은 강의를 적게 배정해요. 지난 날짜의 미완료 강의는 새 일정에 포함돼요.`)) return;
     const at = new Date().toISOString();
-    const session = { subject: '계획', kind: '계획', minutes: 1, memo: JSON.stringify({ date: todayKey(), at }), date: todayKey(), at };
+    const session = { subject: '계획', kind: '계획', minutes: 1, memo: JSON.stringify({ date: todayKey(), from, at }), date: todayKey(), at };
     const old = data.sessions.filter(s => s.kind === '계획');
     save({ ...data, sessions: [session, ...data.sessions.filter(s => s.kind !== '계획')] }, old.map(s => s.localId || s.at));
     setToast('남은 양을 기준으로 일정을 다시 만들었어요');
@@ -780,7 +803,7 @@ function App() {
 </>}
 {tab === '일정' && <>
 <div className="page-title"><div className="eyebrow">SCHEDULE</div><h1>일정</h1><p>이번 주 일정과 강의 번호, 기본이론 완강 일정을 한눈에 확인해.</p></div>
-<section className="panel replan-panel"><div className="panel-heading"><div><div className="eyebrow">REPLAN</div><h2>남은 양으로 일정 다시 만들기</h2></div>{activeRebase&&<span className="record-count">{activeRebase.date.slice(5).replace('-','/')}부터 적용 중</span>}</div><p className="daily-goal-help">일정이 많이 밀렸을 때 쓰는 기능이야. 오늘부터 12월 8일까지, 아직 못 들은 강의 전체(미완료 포함)를 날짜별로 다시 나눠. 다시 만든 뒤에는 못 들어도 다음 날로 밀리지 않고 미완료 목록에 쌓여. 영단어는 매일 1시간 그대로야.</p><div className="replan-actions"><button className="primary-button" type="button" onClick={startReplan}>{activeRebase?'오늘 기준으로 다시 만들기':'오늘부터 다시 만들기'}</button>{activeRebase&&<button className="export-button" type="button" onClick={undoReplan}>원래 일정으로 되돌리기</button>}</div></section>
+<section className="panel replan-panel"><div className="panel-heading"><div><div className="eyebrow">REPLAN</div><h2>남은 양으로 일정 다시 만들기</h2></div>{activeRebase&&<span className="record-count">{activeRebase.date.slice(5).replace('-','/')}부터 적용 중</span>}</div><p className="daily-goal-help">일정이 많이 밀렸을 때 쓰는 기능이야. 아직 못 들은 강의 전체(미완료 포함)를 12월 8일까지 날짜별로 다시 나누고, 알바가 있는 날(월~수 저녁, 11/20 오후)은 강의를 적게 배정해. 다시 만든 뒤에는 못 들어도 다음 날로 밀리지 않고 미완료 목록에 쌓여. 영단어는 매일 1시간 그대로야.</p><div className="replan-actions"><button className="primary-button" type="button" onClick={()=>startReplan(true)}>오늘은 영단어만 · 내일부터 다시 만들기</button><button className="export-button" type="button" onClick={()=>startReplan(false)}>오늘부터 다시 만들기</button>{activeRebase&&<button className="export-button" type="button" onClick={undoReplan}>원래 일정으로 되돌리기</button>}</div></section>
 
 <div className="week-switch"><button className="icon-button" onClick={()=>setWeekShift(weekShift-1)}><ChevronLeft size={18}/></button><b>{new Intl.DateTimeFormat('ko-KR',{month:'long',day:'numeric'}).format(weekDates[0])} – {new Intl.DateTimeFormat('ko-KR',{month:'long',day:'numeric'}).format(weekDates[6])}</b><button className="icon-button" onClick={()=>setWeekShift(weekShift+1)}><ChevronRight size={18}/></button><button className="today-button" onClick={()=>setWeekShift(0)}>이번 주</button></div><section className="weekly-agenda-grid">{weekDates.map((d,i)=>{const date=dateKey(d);const goal=dayTarget(d,lecturePlan);const mins=weekSessions.filter(item=>item.date===date).reduce((sum,item)=>sum+Number(item.minutes),0);const items=todaySchedule(d,lecturePlan);const planDay=lecturePlan.find(day=>dateKey(day.date)===date);const brief=planDay?planDay.tasks.map(({course,lectureNumbers})=>`${course.subject} ${lectureNumbers.length>1?`${lectureNumbers[0]}–${lectureNumbers[lectureNumbers.length-1]}`:lectureNumbers[0]}강`).join(" · "):"";return <details className="panel weekly-day-card" key={date} open={date===todayKey()}><summary className="weekly-day-header"><div><div className="weekly-day-title"><b>{weekdays[i]} {d.getDate()}일</b>{date===todayKey()&&<i>오늘</i>}</div><small>{brief||`${items.filter(item=>item.type==='study').length}개 학습 블록`}</small></div><strong>{fmtHours(goal)}<small>시간</small></strong></summary><div className="weekly-day-progress"><i style={{width:`${Math.min(goal?mins/(goal*60)*100:0,100)}%`}}/></div><div className="weekly-agenda-list">{items.map((item,index)=><div className={`weekly-agenda-row ${item.type}`} key={`${item.time}-${index}`}><time>{item.time}</time><div><b>{item.title}</b><small>{item.sub}</small></div></div>)}</div></details>})}</section>
 <details className="panel lecture-plan-panel compact-lecture-plan"><summary className="lecture-plan-summary"><div className="lecture-plan-head"><div><div className="eyebrow">NOV 11 – DEC 8</div><h2>기본이론 완강 일정</h2><p>남은 {courseTotal-courseCompleted}강 · 종료일은 12월 8일로 유지하고, 계획은 날짜대로 진행되고, 못 들은 강의는 미완료 목록에 남아.</p></div><span className="lecture-plan-total">11/12·13 근무 · 11/20 6강</span></div></summary><div className="lecture-plan-list">{lecturePlan.map(day=>{const key=dateKey(day.date);return <article className="lecture-plan-day" key={key}><div className="lecture-plan-date"><b>{new Intl.DateTimeFormat('ko-KR',{month:'numeric',day:'numeric',weekday:'short'}).format(day.date)}</b><span>{day.goal}강 <i>· 단어 {fmtMinutes(day.wordMinutes)}</i></span></div><div className="lecture-plan-tasks">{day.tasks.map(({course,count})=><span key={course.id}><b>{course.subject}</b>{course.title.replace(/^\[\d+\]\s*/, '')} · {count}강</span>)}</div>{key<todayKey()&&<div className="lecture-plan-status missed"><b>실제 {day.actualLectures}강 완료</b><span>미완료 {day.missedLectures}강 · 단어 {fmtMinutes(day.missedWordMinutes)}</span></div>}{key===todayKey()&&<div className="lecture-plan-status"><b>실제 {day.actualLectures}/{day.goal}강 · {fmt(day.actualMinutes)}</b><span>오늘 남은 강의 {todayUnfinishedLectures}강</span></div>}{key>todayKey()&&day.recoveryLectures>0&&<div className="lecture-plan-status recovery">미완료 강의 보충 +{day.recoveryLectures}강</div>}{key>todayKey()&&day.wordRecoveryMinutes>0&&<div className="lecture-plan-status recovery">단어 미완료 {day.wordRecoveryMinutes}분 보충</div>}{(key==='2026-11-20'||key==='2026-11-12'||key==='2026-11-13'||(day.date.getDay()>=1&&day.date.getDay()<=3))&&<div className="lecture-plan-work"><BriefcaseBusiness size={14}/>{key==='2026-11-20'?'추가 근무 16:00–20:00':'편의점 근무 20:00–24:00'}</div>}</article>})}</div><p className="lecture-plan-note">11월 11일 목표는 영어 2강·행정학 1강이야. 11월 12일부터 날짜별 배정량대로 진행하고(미완료분은 다음 날로 밀지 않아), 매일 단어 1시간을 포함해. 11월 12·13일은 20:00–24:00 근무를 반영했어. 12월 9–10일 예비군은 완강 일정 종료 이후라 배정하지 않아.</p></details>
@@ -807,7 +830,7 @@ function todaySchedule(d, lecturePlan){
   const showTime=value=>`${String(Math.floor(value/60)%24).padStart(2,'0')}:${String(value%60).padStart(2,'0')}`;
   const add=(title,sub,subject,duration,type='study')=>{schedule.push({title,sub,subject,time:`${showTime(cursor)}–${showTime(cursor+duration)}`,type,tag:title.startsWith('영단어')?'매일':''});cursor+=duration;};
   add('영단어 암기',`${key<'2026-11-11'?'교재 도착 전 · 기본 단어 복습':'교재 도착 후 · 신규 단어와 누적 복습'}${planned.wordRecoveryMinutes?` · 미완료 ${planned.wordRecoveryMinutes}분 보충`:''}`,'영어',planned.wordMinutes);
-  add('짧은 휴식','눈과 몸을 쉬어줘','',30,'break');
+  if(planned.tasks.length)add('짧은 휴식','눈과 몸을 쉬어줘','',30,'break');
   let lectureHours=0,lunchAdded=false;
   planned.tasks.forEach(({course,count,lectureNumbers=[]})=>{
     let remaining=count,lectureIndex=0;
