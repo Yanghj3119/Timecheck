@@ -89,6 +89,8 @@ function allocateLectureDays(courses, remaining, dates) {
 }
 
 const lectureMarkerPattern = /\[lec:(\d+)\]/;
+// The starting progress (initialCourses.completed) was set on 11/11 around 14:00 KST.
+const baselineCutMs = Date.parse('2026-11-11T05:30:00Z');
 const lectureMarkedNumbers = (sessions) => sessions
   .filter(session => session.courseId && session.kind === '인강 시청')
   .map(session => Number((String(session.memo || '').match(lectureMarkerPattern) || [])[1]))
@@ -100,10 +102,20 @@ function lectureDoneSets(courses, sessions) {
   return new Map(courses.map(course => {
     const own = sessions.filter(session => session.courseId === course.id && session.kind === '인강 시청');
     const marked = new Set(lectureMarkedNumbers(own));
-    const unmarked = own.filter(session => !lectureMarkerPattern.test(String(session.memo || '')) && session.date >= '2026-11-11').length;
     const base = Number(initialCourses.find(item => item.id === course.id)?.completed ?? course.completed ?? 0);
     const done = new Set(marked);
-    for (let n = 1; n <= Math.min(Number(course.total), base + unmarked); n++) done.add(n);
+    for (let n = 1; n <= Math.min(Number(course.total), base); n++) done.add(n);
+    // Older records have no [lec:N] marker. Their memo usually says which lecture it was
+    // ("16강 수강 완료"); the starting progress already includes records saved before it was set.
+    let unnumbered = 0;
+    own.filter(session => !lectureMarkerPattern.test(String(session.memo || ''))).forEach(session => {
+      const written = String(session.memo || '').match(/(\d+)강 수강 완료/);
+      if (written) done.add(Number(written[1]));
+      else if ((Date.parse(session.at) || 0) > baselineCutMs) unnumbered++;
+    });
+    for (let n = base + 1; unnumbered > 0 && n <= Number(course.total); n++) {
+      if (!done.has(n)) { done.add(n); unnumbered--; }
+    }
     return [course.id, done];
   }));
 }
