@@ -78,6 +78,9 @@ export function mergeStudyData(remote, local) {
 // uploaded earlier but that is now missing on the server was deleted on another device,
 // so it is dropped instead of being uploaded again.
 export function reconcileStudyData(remote, local, syncedIds = new Set()) {
+  // An empty server answer is never treated as "everything was deleted": the server may
+  // be unreadable or wiped, so this device keeps its records (and uploads them again).
+  if (!remote.sessions.length && local.sessions.length) return mergeStudyData(remote, local);
   const remoteIds = new Set(remote.sessions.map(session => session.localId));
   const keptSessions = local.sessions.filter(session => !syncedIds.has(session.localId) || remoteIds.has(session.localId));
   return mergeStudyData(remote, { ...local, sessions: keptSessions });

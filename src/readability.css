@@ -359,3 +359,5 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 
 /* 일정 다시 만들기 */
 .replan-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+
+.import-button{cursor:pointer;margin-left:8px;display:inline-flex;align-items:center}
