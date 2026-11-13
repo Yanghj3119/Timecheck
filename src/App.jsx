@@ -150,7 +150,12 @@ const examDateText = (exam) => {
 // The closest upcoming exam with a date; falls back to the first exam when none is dated.
 const nearestExam = (list) => list.filter(exam => exam.date && daysUntil(exam.date) >= 0).sort((x, y) => daysUntil(x.date) - daysUntil(y.date))[0] || list[0] || null;
 // Exams are stored as 1-minute placeholder sessions (kind '시험') so they sync like other records.
-const isPseudoSession = (session) => session.kind === '메모' || session.kind === '시험';
+const isPseudoSession = (session) => session.kind === '메모' || session.kind === '시험' || session.kind === '계획';
+// "Replan from what is left": the newest 계획 record says from which day, and at which
+// moment, the remaining lectures were spread again over the days up to the end date.
+const latestRebase = (sessions) => sessions.filter(s => s.kind === '계획').map(s => {
+  try { const value = JSON.parse(s.memo); return value && value.date && value.at ? { date: value.date, at: value.at, atMs: Date.parse(value.at) || 0 } : null; } catch { return null; }
+}).filter(Boolean).sort((a, b) => b.atMs - a.atMs)[0] || null;
 const parseExam = (session) => { try { const exam = JSON.parse(session.memo); return exam && exam.name && !exam.empty ? exam : null; } catch { return null; } };
 const tabLabels = ['홈', '오늘의 시간표', '일정', '공부 기록', '학습 통계 및 진도', '설정'];
 const newestFirst = (a, b) => (Date.parse(b.at) || 0) - (Date.parse(a.at) || 0) || String(b.date).localeCompare(String(a.date));
@@ -219,7 +224,7 @@ function buildLecturePlan(courses, sessions = [], today = new Date()) {
     return [course.id, new Set([...doneSets.get(course.id)].filter(n => !watchedToday.has(n)))];
   }));
   const nextNumber = new Map(initialCourses.map(course => [course.id, Number(course.completed) + 1]));
-  const numberedDays = baseDays.map(day => {
+  const baselineDays = baseDays.map(day => {
     const key = dateKey(day.date);
     const isPast = key < todayKeyValue;
     const isToday = key === todayKeyValue;
@@ -237,6 +242,41 @@ function buildLecturePlan(courses, sessions = [], today = new Date()) {
     }).filter(task => task.count > 0);
     return { ...day, goal: tasks.reduce((sum, task) => sum + task.count, 0), tasks };
   });
+
+  // After a replan, every lecture that was still not watched at that moment (including
+  // missed ones) is spread evenly from the replan day to the end date. From then on the
+  // plan is fixed again: missed lectures stay in the catch-up list and do not move.
+  const rebase = latestRebase(sessions);
+  let numberedDays = baselineDays;
+  if (rebase && rebase.date <= lecturePlanEnd) {
+    const doneAtRebase = lectureDoneSets(courses, sessions.filter(session => (Date.parse(session.at) || 0) < rebase.atMs));
+    const candidates = new Map(courses.map(course => [course.id, Array.from({ length: Number(course.total) }, (_, i) => i + 1).filter(n => !doneAtRebase.get(course.id).has(n))]));
+    const rebaseDates = dates.filter(date => dateKey(date) >= rebase.date);
+    const allocated = allocateLectureDays(courses, courses.map(course => candidates.get(course.id).length), rebaseDates);
+    const pointer = new Map(courses.map(course => [course.id, 0]));
+    const rebuilt = new Map(allocated.map(day => {
+      const key = dateKey(day.date);
+      const isPast = key < todayKeyValue;
+      const isToday = key === todayKeyValue;
+      const tasks = day.tasks.map(({ course, count }) => {
+        const list = candidates.get(course.id);
+        const skip = isPast ? new Set() : isToday ? doneBeforeToday.get(course.id) : doneSets.get(course.id);
+        let p = pointer.get(course.id);
+        const lectureNumbers = [];
+        while (lectureNumbers.length < count && p < list.length) {
+          const n = list[p++];
+          if (!skip.has(n)) lectureNumbers.push(n);
+        }
+        pointer.set(course.id, p);
+        return { course, count: lectureNumbers.length, lectureNumbers };
+      }).filter(task => task.count > 0);
+      return [key, { ...day, goal: tasks.reduce((sum, task) => sum + task.count, 0), tasks }];
+    }));
+    numberedDays = baselineDays.map(day => {
+      const key = dateKey(day.date);
+      return rebuilt.get(key) || (key >= rebase.date ? { ...day, goal: 0, tasks: [] } : day);
+    });
+  }
 
   return numberedDays.map(day => {
     const key = dateKey(day.date);
@@ -282,9 +322,11 @@ function buildStudyBacklog(lecturePlan, sessions, courses) {
   });
   const pending = [];
   const done = [];
+  const rebase = latestRebase(sessions);
   lecturePlan.filter(day => dateKey(day.date) < todayKey()).forEach(day => {
     const dueDate = dateKey(day.date);
-    day.tasks.forEach(({ course, lectureNumbers }) => {
+    // Days before a replan were folded into the new schedule, so they are not listed again.
+    day.tasks.filter(() => !rebase || dueDate >= rebase.date).forEach(({ course, lectureNumbers }) => {
       lectureNumbers.forEach(number => {
         const id = `lecture|${dueDate}|${course.id}|${number}`;
         const item = { id, type: 'lecture', number, date: day.date, course, subject: course.subject, title: course.title.replace(/^\[\d+\]\s*/, ''), minutes: 60 };
@@ -702,6 +744,23 @@ function App() {
   };
   const deleteExam = (exam) => { commitExams(examList.filter(e => e.id !== exam.id)); };
   const openExamForm = (exam) => { setExamForm(exam ? { id: exam.id, name: exam.name, track: exam.track || '', date: exam.date || '' } : { id: '', name: '', track: '일반행정', date: '' }); setModal('exam'); };
+  const activeRebase = latestRebase(data.sessions);
+  const startReplan = () => {
+    if (!window.confirm('오늘부터 12월 8일까지, 아직 못 들은 모든 강의(미완료 포함)를 날짜별로 다시 나눌까요?\n지난 날짜의 미완료 강의는 새 일정에 포함돼요.')) return;
+    const at = new Date().toISOString();
+    const session = { subject: '계획', kind: '계획', minutes: 1, memo: JSON.stringify({ date: todayKey(), at }), date: todayKey(), at };
+    const old = data.sessions.filter(s => s.kind === '계획');
+    save({ ...data, sessions: [session, ...data.sessions.filter(s => s.kind !== '계획')] }, old.map(s => s.localId || s.at));
+    setToast('남은 양을 기준으로 일정을 다시 만들었어요');
+    setTimeout(() => setToast(''), 2600);
+  };
+  const undoReplan = () => {
+    const old = data.sessions.filter(s => s.kind === '계획');
+    if (!old.length) return;
+    save({ ...data, sessions: data.sessions.filter(s => s.kind !== '계획') }, old.map(s => s.localId || s.at));
+    setToast('원래 일정으로 되돌렸어요');
+    setTimeout(() => setToast(''), 2600);
+  };
   const removeSession = (at) => { const removed = data.sessions.find((s) => s.at === at); const courses = removed?.courseId ? data.courses.map(c => c.id === removed.courseId ? { ...c, completed: Math.max(0, c.completed - 1) } : c) : data.courses; save({ ...data, courses, sessions: data.sessions.filter((s) => s.at !== at) }, removed ? [removed.localId || removed.at] : []); };
   const menu = [{ label: '홈', icon: Home }, { label: '오늘의 시간표', icon: CalendarDays }, { label: '일정', icon: CalendarDays }, { label: '공부 기록', icon: Clock3 }, { label: '학습 통계 및 진도', icon: ChartNoAxesColumn }, { label: '설정', icon: Settings2 }];
   return <div className="app-shell">
@@ -721,6 +780,7 @@ function App() {
 </>}
 {tab === '일정' && <>
 <div className="page-title"><div className="eyebrow">SCHEDULE</div><h1>일정</h1><p>이번 주 일정과 강의 번호, 기본이론 완강 일정을 한눈에 확인해.</p></div>
+<section className="panel replan-panel"><div className="panel-heading"><div><div className="eyebrow">REPLAN</div><h2>남은 양으로 일정 다시 만들기</h2></div>{activeRebase&&<span className="record-count">{activeRebase.date.slice(5).replace('-','/')}부터 적용 중</span>}</div><p className="daily-goal-help">일정이 많이 밀렸을 때 쓰는 기능이야. 오늘부터 12월 8일까지, 아직 못 들은 강의 전체(미완료 포함)를 날짜별로 다시 나눠. 다시 만든 뒤에는 못 들어도 다음 날로 밀리지 않고 미완료 목록에 쌓여. 영단어는 매일 1시간 그대로야.</p><div className="replan-actions"><button className="primary-button" type="button" onClick={startReplan}>{activeRebase?'오늘 기준으로 다시 만들기':'오늘부터 다시 만들기'}</button>{activeRebase&&<button className="export-button" type="button" onClick={undoReplan}>원래 일정으로 되돌리기</button>}</div></section>
 
 <div className="week-switch"><button className="icon-button" onClick={()=>setWeekShift(weekShift-1)}><ChevronLeft size={18}/></button><b>{new Intl.DateTimeFormat('ko-KR',{month:'long',day:'numeric'}).format(weekDates[0])} – {new Intl.DateTimeFormat('ko-KR',{month:'long',day:'numeric'}).format(weekDates[6])}</b><button className="icon-button" onClick={()=>setWeekShift(weekShift+1)}><ChevronRight size={18}/></button><button className="today-button" onClick={()=>setWeekShift(0)}>이번 주</button></div><section className="weekly-agenda-grid">{weekDates.map((d,i)=>{const date=dateKey(d);const goal=dayTarget(d,lecturePlan);const mins=weekSessions.filter(item=>item.date===date).reduce((sum,item)=>sum+Number(item.minutes),0);const items=todaySchedule(d,lecturePlan);const planDay=lecturePlan.find(day=>dateKey(day.date)===date);const brief=planDay?planDay.tasks.map(({course,lectureNumbers})=>`${course.subject} ${lectureNumbers.length>1?`${lectureNumbers[0]}–${lectureNumbers[lectureNumbers.length-1]}`:lectureNumbers[0]}강`).join(" · "):"";return <details className="panel weekly-day-card" key={date} open={date===todayKey()}><summary className="weekly-day-header"><div><div className="weekly-day-title"><b>{weekdays[i]} {d.getDate()}일</b>{date===todayKey()&&<i>오늘</i>}</div><small>{brief||`${items.filter(item=>item.type==='study').length}개 학습 블록`}</small></div><strong>{fmtHours(goal)}<small>시간</small></strong></summary><div className="weekly-day-progress"><i style={{width:`${Math.min(goal?mins/(goal*60)*100:0,100)}%`}}/></div><div className="weekly-agenda-list">{items.map((item,index)=><div className={`weekly-agenda-row ${item.type}`} key={`${item.time}-${index}`}><time>{item.time}</time><div><b>{item.title}</b><small>{item.sub}</small></div></div>)}</div></details>})}</section>
 <details className="panel lecture-plan-panel compact-lecture-plan"><summary className="lecture-plan-summary"><div className="lecture-plan-head"><div><div className="eyebrow">NOV 11 – DEC 8</div><h2>기본이론 완강 일정</h2><p>남은 {courseTotal-courseCompleted}강 · 종료일은 12월 8일로 유지하고, 계획은 날짜대로 진행되고, 못 들은 강의는 미완료 목록에 남아.</p></div><span className="lecture-plan-total">11/12·13 근무 · 11/20 6강</span></div></summary><div className="lecture-plan-list">{lecturePlan.map(day=>{const key=dateKey(day.date);return <article className="lecture-plan-day" key={key}><div className="lecture-plan-date"><b>{new Intl.DateTimeFormat('ko-KR',{month:'numeric',day:'numeric',weekday:'short'}).format(day.date)}</b><span>{day.goal}강 <i>· 단어 {fmtMinutes(day.wordMinutes)}</i></span></div><div className="lecture-plan-tasks">{day.tasks.map(({course,count})=><span key={course.id}><b>{course.subject}</b>{course.title.replace(/^\[\d+\]\s*/, '')} · {count}강</span>)}</div>{key<todayKey()&&<div className="lecture-plan-status missed"><b>실제 {day.actualLectures}강 완료</b><span>미완료 {day.missedLectures}강 · 단어 {fmtMinutes(day.missedWordMinutes)}</span></div>}{key===todayKey()&&<div className="lecture-plan-status"><b>실제 {day.actualLectures}/{day.goal}강 · {fmt(day.actualMinutes)}</b><span>오늘 남은 강의 {todayUnfinishedLectures}강</span></div>}{key>todayKey()&&day.recoveryLectures>0&&<div className="lecture-plan-status recovery">미완료 강의 보충 +{day.recoveryLectures}강</div>}{key>todayKey()&&day.wordRecoveryMinutes>0&&<div className="lecture-plan-status recovery">단어 미완료 {day.wordRecoveryMinutes}분 보충</div>}{(key==='2026-11-20'||key==='2026-11-12'||key==='2026-11-13'||(day.date.getDay()>=1&&day.date.getDay()<=3))&&<div className="lecture-plan-work"><BriefcaseBusiness size={14}/>{key==='2026-11-20'?'추가 근무 16:00–20:00':'편의점 근무 20:00–24:00'}</div>}</article>})}</div><p className="lecture-plan-note">11월 11일 목표는 영어 2강·행정학 1강이야. 11월 12일부터 날짜별 배정량대로 진행하고(미완료분은 다음 날로 밀지 않아), 매일 단어 1시간을 포함해. 11월 12·13일은 20:00–24:00 근무를 반영했어. 12월 9–10일 예비군은 완강 일정 종료 이후라 배정하지 않아.</p></details>

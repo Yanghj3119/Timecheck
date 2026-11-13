@@ -356,3 +356,6 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 /* 목표 시험 편집 */
 .exam-edit{padding:6px 10px;font-size:12px;white-space:nowrap}
 .exam-add-row{justify-content:flex-start}
+
+/* 일정 다시 만들기 */
+.replan-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
