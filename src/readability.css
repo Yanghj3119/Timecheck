@@ -364,3 +364,12 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 
 .check-label{display:flex;align-items:center;gap:8px}
 .check-label input{width:auto}
+
+/* 설정: 목표와 근무 카드를 색으로 구분 */
+.settings-panel{margin-bottom:20px}
+.goal-panel{border-left:5px solid #6f8f7a}
+.work-panel{border-left:5px solid #d3a563}
+.goal-panel .panel-heading .eyebrow{color:#4f7660}
+.work-panel .panel-heading .eyebrow{color:#a9772c}
+.work-panel .setting-icon{background:#fbf3e4;color:#c28b3c}
+.goal-panel .setting-icon{background:#eaf3ed;color:#5f8a70}
