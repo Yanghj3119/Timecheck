@@ -373,3 +373,9 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .work-panel .panel-heading .eyebrow{color:#a9772c}
 .work-panel .setting-icon{background:#fbf3e4;color:#c28b3c}
 .goal-panel .setting-icon{background:#eaf3ed;color:#5f8a70}
+/* 학습 계획 카드 */
+.plan-panel{border-left:5px solid #8a79c4}
+.plan-panel .panel-heading .eyebrow{color:#6f5fb0}
+.plan-panel .setting-icon{background:#f0edfa;color:#7d6cc0}
+.plan-panel .exam-add-row{gap:8px;flex-wrap:wrap}
+.weekday-picks{display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px;font-size:13px;margin:4px 0 8px}

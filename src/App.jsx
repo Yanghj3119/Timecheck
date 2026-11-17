@@ -62,6 +62,8 @@ const defaultEvents = [
 const eventsToMap = (list) => list.filter(e => e.date && (e.allDay || (e.start && e.end))).reduce((map, e) => { (map[e.date] ||= []).push(e); return map; }, {});
 // Refreshed from the saved list on every render of the app, before the plan is built.
 let specialEvents = eventsToMap(defaultEvents);
+// Minutes of added time plans per day (date -> minutes); they take room away from lectures.
+let planMinutesByDate = {};
 const toMinutes = (hhmm) => { const [h, m] = String(hhmm).split(':').map(Number); return h * 60 + (m || 0); };
 const isNoStudyDay = (key) => noStudyDates.has(key) || (specialEvents[key] || []).some(e => e.allDay);
 // How many lectures each day can hold, as a share (largest-remainder rounding).
@@ -83,10 +85,23 @@ function quotasByWeight(total, weights, caps = []) {
   }
   return quotas;
 }
+// Lecture room left on a day that has time plans: the plans (and the usual 07:00 start with words
+// and breaks) are taken from the time before work (20:00 Mon–Wed or the first event) or before 22:30.
+const timePlanCap = (date) => {
+  const key = dateKey(date);
+  const minutes = planMinutesByDate[key] || 0;
+  if (!minutes) return null;
+  const starts = (specialEvents[key] || []).filter(e => !e.allDay).map(e => toMinutes(e.start));
+  if ([1, 2, 3].includes(date.getDay())) starts.push(20 * 60);
+  const limit = starts.length ? Math.min(...starts) : 22 * 60 + 30;
+  return Math.max(0, Math.floor((limit - 550 - minutes) / 80));
+};
 // Hard maximum of lectures before an event that starts earlier than 20:00. The day starts at
 // 07:00 with 1h of words and a break, and every lecture needs about 80 minutes with breaks and lunch.
 const lectureDayCap = (date) => {
   const caps = (specialEvents[dateKey(date)] || []).filter(e => !e.allDay && toMinutes(e.start) < 20 * 60).map(e => Math.max(0, Math.floor((toMinutes(e.start) - 550) / 80)));
+  const planCap = timePlanCap(date);
+  if (planCap != null) caps.push(planCap);
   return caps.length ? Math.min(...caps) : null;
 };
 // Share of a free day that is usable: evening events (20:00+) leave 0.7, a Mon–Wed evening shift
@@ -100,6 +115,8 @@ const lectureDayWeight = (date) => {
     const start = toMinutes(e.start);
     weights.push(start >= 22 * 60 ? 1 : start >= 20 * 60 ? 0.7 : Math.max(0, Math.floor((start - 550) / 80)) / 10);
   });
+  const planCap = timePlanCap(date);
+  if (planCap != null) weights.push(planCap / 10);
   return weights.length ? Math.min(...weights) : 1;
 };
 function allocateLectureDays(courses, remaining, dates, weightFn = null, capFn = null) {
@@ -204,28 +221,36 @@ const examDateText = (exam) => {
 // The closest upcoming exam with a date; falls back to the first exam when none is dated.
 const nearestExam = (list) => list.filter(exam => exam.date && daysUntil(exam.date) >= 0).sort((x, y) => daysUntil(x.date) - daysUntil(y.date))[0] || list[0] || null;
 // Exams are stored as 1-minute placeholder sessions (kind '시험') so they sync like other records.
-const isPseudoSession = (session) => session.kind === '메모' || session.kind === '시험' || session.kind === '계획' || session.kind === '특별일정';
+const isPseudoSession = (session) => session.kind === '메모' || session.kind === '시험' || session.kind === '계획' || session.kind === '특별일정' || session.kind === '학습계획';
 // "Replan from what is left": the newest 계획 record says from which day, and at which
 // moment, the remaining lectures were spread again over the days up to the end date.
 const latestRebase = (sessions) => sessions.filter(s => s.kind === '계획').map(s => {
   try { const value = JSON.parse(s.memo); return value && value.date && value.at ? { date: value.date, from: value.from || value.date, at: value.at, atMs: Date.parse(value.at) || 0 } : null; } catch { return null; }
 }).filter(Boolean).sort((a, b) => b.atMs - a.atMs)[0] || null;
+// Study plans added in the app (stored as 1-minute placeholder records of kind '학습계획'):
+//  - { kind: 'lecture', id, subject, title, total, done, method: 'deadline' | 'perDay', start, end, perDay }
+//  - { kind: 'time', id, subject, title, minutes, start, end, weekdays: [0..6] }
+const parseStudyPlan = (session) => { try { const v = JSON.parse(session.memo); return v && v.id && !v.empty && (v.kind === 'lecture' || v.kind === 'time') ? v : null; } catch { return null; } };
+const parseDateKey = (key) => { const [y, m, d] = String(key).split('-').map(Number); return new Date(y, m - 1, d); };
+const planToCourse = (plan) => ({ id: plan.id, subject: plan.subject, title: plan.title, total: Number(plan.total), completed: Number(plan.done) || 0, custom: true, start: plan.start, end: plan.end || null, method: plan.method || 'deadline', perDay: Number(plan.perDay) || 0 });
 const parseEvent = (session) => { try { const v = JSON.parse(session.memo); return v && v.date && !v.empty && (v.allDay || (v.start && v.end)) ? v : null; } catch { return null; } };
 const parseExam = (session) => { try { const exam = JSON.parse(session.memo); return exam && exam.name && !exam.empty ? exam : null; } catch { return null; } };
 const tabLabels = ['홈', '오늘의 시간표', '일정', '공부 기록', '학습 통계 및 진도', '설정'];
 const newestFirst = (a, b) => (Date.parse(b.at) || 0) - (Date.parse(a.at) || 0) || String(b.date).localeCompare(String(a.date));
-const cleanMemo = (memo) => String(memo || '').replace(/\[(?:lec:\d+|catchup(?::[^\]]*)?|extra)\]\s*/g, '').trim();
+const cleanMemo = (memo) => String(memo || '').replace(/\[(?:lec:\d+|catchup(?::[^\]]*)?|extra|plan:[^\]]*)\]\s*/g, '').trim();
 const nextUndoneLecture = (course, doneSet) => {
   for (let n = 1; n <= Number(course.total); n++) if (!doneSet.has(n)) return n;
   return null;
 };
 
-function buildLecturePlan(courses, sessions = [], today = new Date()) {
-  const dates = Array.from({ length: lecturePlanDays }, (_, i) => {
-    const date = new Date(lecturePlanStart);
-    date.setDate(date.getDate() + i);
-    return date;
-  });
+const makePlanDates = (length) => Array.from({ length }, (_, i) => {
+  const date = new Date(lecturePlanStart);
+  date.setDate(date.getDate() + i);
+  return date;
+});
+// Plan for the four core courses (basic theory) until lecturePlanEnd. `dates` may reach further
+// (for courses added later); the core courses never get lectures after lecturePlanEnd.
+function buildCorePlan(courses, sessions = [], today = new Date(), dates = makePlanDates(lecturePlanDays)) {
   const todayKeyValue = dateKey(today);
   const startKey = dateKey(lecturePlanStart);
   const planSessions = sessions.filter(session =>
@@ -251,7 +276,7 @@ function buildLecturePlan(courses, sessions = [], today = new Date()) {
     goal: baselineTodayTasks.reduce((sum, task) => sum + task.count, 0),
     tasks: baselineTodayTasks,
   };
-  const postStartDates = dates.filter(date => dateKey(date) >= firstRebalanceKey);
+  const postStartDates = dates.filter(date => dateKey(date) >= firstRebalanceKey && dateKey(date) <= lecturePlanEnd);
   const baselinePostStart = allocateLectureDays(initialCourses, initialRemaining, postStartDates);
   const baselineByDate = new Map([
     [planStartKey, baselineToday],
@@ -306,7 +331,7 @@ function buildLecturePlan(courses, sessions = [], today = new Date()) {
   if (rebase && rebase.date <= lecturePlanEnd) {
     const doneAtRebase = lectureDoneSets(courses, sessions.filter(session => (Date.parse(session.at) || 0) < rebase.atMs));
     const candidates = new Map(courses.map(course => [course.id, Array.from({ length: Number(course.total) }, (_, i) => i + 1).filter(n => !doneAtRebase.get(course.id).has(n))]));
-    const rebaseDates = dates.filter(date => dateKey(date) >= (rebase.from || rebase.date));
+    const rebaseDates = dates.filter(date => dateKey(date) >= (rebase.from || rebase.date) && dateKey(date) <= lecturePlanEnd);
     const allocated = allocateLectureDays(courses, courses.map(course => candidates.get(course.id).length), rebaseDates, lectureDayWeight, lectureDayCap);
     const pointer = new Map(courses.map(course => [course.id, 0]));
     const rebuilt = new Map(allocated.map(day => {
@@ -376,6 +401,124 @@ function buildLecturePlan(courses, sessions = [], today = new Date()) {
     };
   });
 }
+// Start and last day of a course that was added in the app. A "perDay" course ends when its
+// remaining lectures are used up, counting only the days that can hold lectures.
+const courseWindow = (course) => {
+  if (course.method !== 'perDay') return { start: course.start, end: course.end || course.start };
+  let left = Math.max(0, Number(course.total) - Number(course.completed));
+  const per = Math.max(1, Number(course.perDay) || 1);
+  const day = parseDateKey(course.start);
+  let end = course.start;
+  for (let i = 0; i < 400 && left > 0; i++) {
+    const cap = lectureDayCap(day);
+    if (lectureDayWeight(day) > 0) { left -= cap != null ? Math.min(per, cap) : per; end = dateKey(day); }
+    day.setDate(day.getDate() + 1);
+  }
+  return { start: course.start, end };
+};
+
+// Whole plan: the core courses (unchanged logic) plus courses and time plans added in the app.
+function buildLecturePlan(allCourses, sessions = [], today = new Date(), timePlans = []) {
+  const coreCourses = allCourses.filter(course => coreCourseIds.has(course.id));
+  const extraCourses = allCourses.filter(course => !coreCourseIds.has(course.id));
+  if (!extraCourses.length && !timePlans.length) return buildCorePlan(coreCourses, sessions, today);
+  const windows = new Map(extraCourses.map(course => [course.id, courseWindow(course)]));
+  let endKey = lecturePlanEnd;
+  windows.forEach(win => { if (win.end > endKey) endKey = win.end; });
+  timePlans.forEach(plan => { if (plan.end > endKey) endKey = plan.end; });
+  const length = Math.max(lecturePlanDays, Math.round((parseDateKey(endKey) - lecturePlanStart) / 86400000) + 1);
+  const dates = makePlanDates(length);
+  const coreDays = buildCorePlan(coreCourses, sessions, today, dates);
+  const todayKeyValue = dateKey(today);
+  const rebase = latestRebase(sessions);
+  const doneSets = lectureDoneSets(allCourses, sessions);
+  const doneBeforeToday = new Map(allCourses.map(course => {
+    const watched = new Set(lectureMarkedNumbers(sessions.filter(s => s.courseId === course.id && s.date === todayKeyValue)));
+    return [course.id, new Set([...doneSets.get(course.id)].filter(n => !watched.has(n)))];
+  }));
+
+  // Lectures of the added courses per day. Like the core plan, the split is fixed when the
+  // course is added (or when the schedule is rebuilt), and lecture numbers skip finished ones.
+  const extraByDate = new Map();
+  extraCourses.forEach(course => {
+    const win = windows.get(course.id);
+    const useRebase = Boolean(rebase) && rebase.date <= win.end;
+    const refMs = useRebase ? rebase.atMs : 0;
+    const doneAtRef = lectureDoneSets([course], sessions.filter(s => (Date.parse(s.at) || 0) < refMs)).get(course.id);
+    const candidates = Array.from({ length: Number(course.total) }, (_, i) => i + 1).filter(n => !doneAtRef.has(n));
+    const rebaseFrom = useRebase ? (rebase.from || rebase.date) : win.start;
+    const fromKey = rebaseFrom > win.start ? rebaseFrom : win.start;
+    const windowDates = dates.filter(date => { const k = dateKey(date); return k >= fromKey && k <= win.end; });
+    let quotas;
+    if (course.method === 'perDay') {
+      let left = candidates.length;
+      const per = Math.max(1, Number(course.perDay) || 1);
+      quotas = windowDates.map(date => {
+        if (lectureDayWeight(date) <= 0 || left <= 0) return 0;
+        const cap = lectureDayCap(date);
+        const q = Math.min(left, cap != null ? Math.min(per, cap) : per);
+        left -= q;
+        return q;
+      });
+    } else {
+      quotas = quotasByWeight(candidates.length, windowDates.map(lectureDayWeight), windowDates.map(lectureDayCap));
+    }
+    let p = 0;
+    windowDates.forEach((date, i) => {
+      const key = dateKey(date);
+      const skip = key < todayKeyValue ? new Set() : key === todayKeyValue ? doneBeforeToday.get(course.id) : doneSets.get(course.id);
+      const numbers = [];
+      while (numbers.length < quotas[i] && p < candidates.length) {
+        const n = candidates[p++];
+        if (!skip.has(n)) numbers.push(n);
+      }
+      if (numbers.length) {
+        const list = extraByDate.get(key) || [];
+        list.push({ course, count: numbers.length, lectureNumbers: numbers });
+        extraByDate.set(key, list);
+      }
+    });
+  });
+
+  const timeBlocksFor = (date) => {
+    const key = dateKey(date);
+    if (isNoStudyDay(key)) return [];
+    return timePlans
+      .filter(plan => plan.start <= key && key <= plan.end && (!plan.weekdays || plan.weekdays.includes(date.getDay())))
+      .map(plan => ({ id: plan.id, title: plan.title, subject: plan.subject, minutes: Number(plan.minutes) }));
+  };
+
+  return coreDays.map(day => {
+    const key = dateKey(day.date);
+    const extraTasks = extraByDate.get(key) || [];
+    const absorbed = Boolean(day.absorbed);
+    const keptExtra = absorbed
+      ? extraTasks.map(({ course, lectureNumbers }) => {
+          const kept = lectureNumbers.filter(n => doneSets.get(course.id).has(n));
+          return { course, count: kept.length, lectureNumbers: kept };
+        }).filter(task => task.count)
+      : extraTasks;
+    const missedExtra = key < todayKeyValue && !absorbed
+      ? extraTasks.map(({ course, lectureNumbers }) => {
+          const missing = lectureNumbers.filter(n => !doneSets.get(course.id).has(n));
+          return { course, count: missing.length, lectureNumbers: missing };
+        }).filter(task => task.count)
+      : [];
+    const actualExtra = extraCourses.reduce((sum, course) => sum + sessions.filter(s => s.courseId === course.id && s.kind === '인강 시청' && s.date === key && !isCatchupSession(s)).length, 0);
+    const blocks = timeBlocksFor(day.date);
+    const tasks = [...day.tasks, ...keptExtra];
+    return {
+      ...day,
+      tasks,
+      goal: tasks.reduce((sum, task) => sum + task.count, 0),
+      missedTasks: [...day.missedTasks, ...missedExtra],
+      missedLectures: day.missedLectures + missedExtra.reduce((sum, task) => sum + task.count, 0),
+      actualLectures: day.actualLectures + actualExtra,
+      timeBlocks: blocks,
+      timeMinutes: blocks.reduce((sum, block) => sum + block.minutes, 0),
+    };
+  }).filter(day => dateKey(day.date) <= lecturePlanEnd || day.tasks.length > 0 || day.timeBlocks.length > 0);
+}
 function buildStudyBacklog(lecturePlan, sessions, courses) {
   const doneSets = lectureDoneSets(courses, sessions);
   const lectureWatchDates = new Map();
@@ -402,6 +545,15 @@ function buildStudyBacklog(lecturePlan, sessions, courses) {
         if (!doneSets.get(course.id)?.has(number)) pending.push(item);
         else if (watchedOn && watchedOn > dueDate) done.push({ ...item, completedDate: watchedOn });
       });
+    });
+    (day.timeBlocks || []).forEach(block => {
+      const recorded = sessions.filter(s => s.date === dueDate && String(s.memo || '').includes(`[plan:${block.id}]`) && !isCatchupSession(s)).reduce((sum, s) => sum + Number(s.minutes), 0);
+      const short = block.minutes - recorded;
+      const id = `plan|${dueDate}|${block.id}`;
+      const item = { id, type: 'plan', date: day.date, subject: block.subject, title: block.title, minutes: Math.max(0, short) };
+      const completion = completed.get(id);
+      if (completion) done.push({ ...item, minutes: Number(completion.minutes) || item.minutes, completedDate: completion.date });
+      else if (short > 0) pending.push(item);
     });
     if (day.missedWordMinutes > 0) {
       const id = `words|${dueDate}`;
@@ -441,6 +593,7 @@ function App() {
   const [goalInput, setGoalInput] = useState('');
   const [examForm, setExamForm] = useState({ id: '', name: '', track: '일반행정', date: '' });
   const [replanAsk, setReplanAsk] = useState(null);
+  const [planForm, setPlanForm] = useState({ id: '', kind: 'lecture', subject: '국어', title: '', total: '', done: '0', method: 'deadline', start: '2026-12-09', end: '', perDay: '2', minutes: '120', weekdays: [0, 1, 2, 3, 4, 5, 6] });
   const [eventForm, setEventForm] = useState({ id: '', title: '', date: '', start: '14:00', end: '16:00', allDay: false });
   const [goalNote, setGoalNote] = useState('');
   const [tripForm, setTripForm] = useState({ route: '', minutes: 10, note: '도보' });
@@ -655,6 +808,26 @@ function App() {
     ? data.sessions.filter(s => s.kind === '특별일정').sort((a, b) => (Date.parse(a.at) || 0) - (Date.parse(b.at) || 0)).map(parseEvent).filter(Boolean)
     : defaultEvents).slice().sort((a, b) => a.date.localeCompare(b.date) || String(a.start || '').localeCompare(String(b.start || '')));
   specialEvents = eventsToMap(eventList);
+  // Courses and time plans added in the app. Their progress is derived from the records, too.
+  const { planItems, timePlans, allCourses } = useMemo(() => {
+    const items = data.sessions.filter(s => s.kind === '학습계획').sort((a, b) => (Date.parse(a.at) || 0) - (Date.parse(b.at) || 0)).map(parseStudyPlan).filter(Boolean);
+    const base = items.filter(p => p.kind === 'lecture').map(planToCourse);
+    const sets = lectureDoneSets(base, data.sessions);
+    const custom = base.map(course => ({ ...course, completed: Math.min(course.total, sets.get(course.id).size) }));
+    return { planItems: items, timePlans: items.filter(p => p.kind === 'time'), allCourses: [...data.courses, ...custom] };
+  }, [data.courses, data.sessions]);
+  planMinutesByDate = (() => {
+    const map = {};
+    timePlans.forEach(plan => {
+      const day = parseDateKey(plan.start);
+      for (let i = 0; i < 400 && dateKey(day) <= plan.end; i++) {
+        const key = dateKey(day);
+        if (!isNoStudyDay(key) && (!plan.weekdays || plan.weekdays.includes(day.getDay()))) map[key] = (map[key] || 0) + Number(plan.minutes);
+        day.setDate(day.getDate() + 1);
+      }
+    });
+    return map;
+  })();
   const sessionsToday = data.sessions.filter((s) => s.date === todayKey() && !isPseudoSession(s));
   const extraSessionsToday = sessionsToday.filter(s => String(s.memo || '').startsWith('[extra]')).sort(newestFirst);
   const savedMemos = [
@@ -663,11 +836,11 @@ function App() {
   ].sort((a, b) => String(b.date).localeCompare(String(a.date)) || String(b.at || '').localeCompare(String(a.at || ''))).slice(0, 30);
   const todayGoals = data.dailyGoals?.[todayKey()] || { tasks: [], note: '' };
   const todayMinutes = sessionsToday.filter(s => !isCatchupSession(s)).reduce((a, s) => a + Number(s.minutes), 0);
-  const courseCompleted = data.courses.reduce((sum,c)=>sum+Number(c.completed),0);
-  const courseTotal = data.courses.reduce((sum,c)=>sum+Number(c.total),0);
-  const lecturePlan = useMemo(() => buildLecturePlan(data.courses, data.sessions), [data.courses, data.sessions]);
-  const studyBacklog = useMemo(() => buildStudyBacklog(lecturePlan, data.sessions, data.courses), [lecturePlan, data.sessions, data.courses]);
-  const lectureDone = useMemo(() => lectureDoneSets(data.courses, data.sessions), [data.courses, data.sessions]);
+  const courseCompleted = allCourses.reduce((sum,c)=>sum+Number(c.completed),0);
+  const courseTotal = allCourses.reduce((sum,c)=>sum+Number(c.total),0);
+  const lecturePlan = useMemo(() => buildLecturePlan(allCourses, data.sessions, new Date(), timePlans), [allCourses, data.sessions, timePlans]);
+  const studyBacklog = useMemo(() => buildStudyBacklog(lecturePlan, data.sessions, allCourses), [lecturePlan, data.sessions, allCourses]);
+  const lectureDone = useMemo(() => lectureDoneSets(allCourses, data.sessions), [allCourses, data.sessions]);
   const isLectureDone = (courseId, number) => lectureDone.get(courseId)?.has(number) || false;
   const todayPlan = lecturePlan.find(day => dateKey(day.date) === todayKey());
   const futureLectureDays = lecturePlan.filter(day => dateKey(day.date) >= todayKey()).length;
@@ -675,20 +848,22 @@ function App() {
   const todayActualWords = sessionsToday.filter(session => session.kind === '단어 암기' && !String(session.memo || '').startsWith('[catchup:')).reduce((sum, session) => sum + Number(session.minutes), 0);
   const todayUnfinishedLectures = todayPlan ? todayPlan.tasks.reduce((sum, { course, lectureNumbers }) => sum + lectureNumbers.filter(n => !isLectureDone(course.id, n)).length, 0) : 0;
   const todayUnfinishedMinutes = todayPlan ? todayUnfinishedLectures * 60 + Math.max(0, todayPlan.wordMinutes - todayActualWords) : 0;
-  const todayActualLecturesByCourse = Object.fromEntries(data.courses.map(course => [course.id, sessionsToday.filter(session => session.courseId === course.id && session.kind === '인강 시청').length]));
+  const todayActualLecturesByCourse = Object.fromEntries(allCourses.map(course => [course.id, sessionsToday.filter(session => session.courseId === course.id && session.kind === '인강 시청').length]));
   const todayGoalLectureTasks = (todayPlan?.tasks || []).flatMap(({ course, count, lectureNumbers = [] }) => Array.from({ length: count }, (_, index) => ({ course, lectureNumber: lectureNumbers[index] || Number(course.completed) - todayActualLecturesByCourse[course.id] + index + 1, key: `lecture:${course.id}:${lectureNumbers[index] || index + 1}` })));
   const todayGoalCompleted = todayGoalLectureTasks.reduce((sum, task) => sum + (isLectureDone(task.course.id, task.lectureNumber) ? 1 : 0), 0) + (todayGoals.tasks || []).filter(task => task.done).length;
   const todayGoalTotal = todayGoalLectureTasks.length + (todayGoals.tasks || []).length;
+  const todayTimeBlocks = todayPlan?.timeBlocks || [];
+  const blockRecorded = (block) => sessionsToday.filter(s => String(s.memo || '').includes(`[plan:${block.id}]`) && !isCatchupSession(s)).reduce((sum, s) => sum + Number(s.minutes), 0);
   const wordPlanMinutes = todayPlan?.wordMinutes ?? 60;
   const todayWordsDone = wordPlanMinutes > 0 && todayActualWords >= wordPlanMinutes;
-  const todayStudyTotal = todayGoalLectureTasks.length + (wordPlanMinutes > 0 ? 1 : 0);
-  const todayStudyDone = todayGoalLectureTasks.filter(task => isLectureDone(task.course.id, task.lectureNumber)).length + (todayWordsDone ? 1 : 0);  const weekStart = useMemo(() => { const d = studyDate(weekShift * 7); d.setDate(d.getDate() - (d.getDay() + 6) % 7); d.setHours(0, 0, 0, 0); return d; }, [weekShift]);
+  const todayStudyTotal = todayGoalLectureTasks.length + (wordPlanMinutes > 0 ? 1 : 0) + todayTimeBlocks.length;
+  const todayStudyDone = todayGoalLectureTasks.filter(task => isLectureDone(task.course.id, task.lectureNumber)).length + (todayWordsDone ? 1 : 0) + todayTimeBlocks.filter(block => blockRecorded(block) >= block.minutes).length;  const weekStart = useMemo(() => { const d = studyDate(weekShift * 7); d.setDate(d.getDate() - (d.getDay() + 6) % 7); d.setHours(0, 0, 0, 0); return d; }, [weekShift]);
   const weekDates = Array.from({ length: 7 }, (_, i) => { const d = new Date(weekStart); d.setDate(d.getDate() + i); return d; });
   const weekSessions = data.sessions.filter((s) => !isPseudoSession(s) && s.date >= dateKey(weekDates[0]) && s.date <= dateKey(weekDates[6])).sort(newestFirst);
   const weekMinutes = weekSessions.reduce((a, s) => a + Number(s.minutes), 0);
   const weekTargetHours = weekDates.reduce((sum, d) => sum + dayTarget(d, lecturePlan), 0);
   const weekTargetMinutes = weekTargetHours * 60;
-  const formCourse = data.courses.find(course => course.id === form.courseId) || data.courses[0];
+  const formCourse = allCourses.find(course => course.id === form.courseId) || allCourses[0];
   const formLectureOptions = formCourse ? Array.from({ length: Number(formCourse.total) }, (_, i) => i + 1).filter(n => !isLectureDone(formCourse.id, n)) : [];
   const formLecture = formLectureOptions.includes(Number(form.lecture)) ? Number(form.lecture) : formLectureOptions[0];
   const addSession = (e) => {
@@ -758,11 +933,18 @@ function App() {
   };
   const recordCatchup = (item) => {
     if (item.type === 'lecture') {
-      completeLecture(data.courses.find(entry => entry.id === item.course.id), item.number);
+      completeLecture(allCourses.find(entry => entry.id === item.course.id), item.number);
       return;
     }
     const at = new Date().toISOString();
     const marker = `[catchup:${item.id}]`;
+    if (item.type === 'plan') {
+      const planSession = { subject: item.subject, kind: '복습·문제풀이', minutes: item.minutes, memo: `${marker} ${item.title} · ${new Intl.DateTimeFormat('ko-KR',{month:'numeric',day:'numeric'}).format(item.date)} 미완료분 보충`, date: todayKey(), at };
+      save({ ...data, sessions: [planSession, ...data.sessions] });
+      setToast(`${item.title} ${fmtMinutes(item.minutes)} 보충 완료로 기록했어`);
+      setTimeout(() => setToast(''), 2600);
+      return;
+    }
     const session = { subject: '영어', kind: '단어 암기', minutes: item.minutes, memo: `${marker} ${new Intl.DateTimeFormat('ko-KR',{month:'numeric',day:'numeric'}).format(item.date)} 미완료분 보충`, date: todayKey(), at };
     save({ ...data, sessions: [session, ...data.sessions] });
     setToast(`영단어 ${fmtMinutes(item.minutes)} 보충 완료로 기록했어`);
@@ -891,6 +1073,61 @@ function App() {
     setEventForm(entry ? { id: entry.id, title: entry.title, date: entry.date, start: entry.start || '14:00', end: entry.end === '24:00' ? '00:00' : (entry.end || '16:00'), allDay: Boolean(entry.allDay) } : { id: '', title: '', date: todayKey(), start: '14:00', end: '16:00', allDay: false });
     setModal('event');
   };
+  const completeTimeBlock = (block) => {
+    const minutes = block.minutes - blockRecorded(block);
+    if (minutes <= 0) return;
+    const session = { subject: block.subject, kind: '복습·문제풀이', minutes, memo: `[plan:${block.id}] ${block.title}`, date: todayKey(), at: new Date().toISOString() };
+    save({ ...data, sessions: [session, ...data.sessions] });
+    setToast(`${block.title} ${fmtMinutes(minutes)} 완료로 기록했어`);
+    setTimeout(() => setToast(''), 2600);
+  };
+  const undoTimeBlock = (block) => {
+    const ats = sessionsToday.filter(s => String(s.memo || '').includes(`[plan:${block.id}]`) && !isCatchupSession(s)).map(s => s.at);
+    if (removeSessions(ats)) setToast(`${block.title} 완료를 취소했어`);
+    setTimeout(() => setToast(''), 2600);
+  };
+  // Added courses / time plans are saved like exams: 1-minute placeholder records of kind '학습계획'.
+  const commitPlans = (nextList) => {
+    const old = data.sessions.filter(s => s.kind === '학습계획');
+    const base = Date.now();
+    const created = (nextList.length ? nextList : [{ empty: true, id: '-' }]).map((entry, index) => ({
+      subject: '학습계획', kind: '학습계획', minutes: 1, memo: JSON.stringify(entry), date: todayKey(), at: new Date(base + index).toISOString(),
+    }));
+    save({ ...data, sessions: [...created, ...data.sessions.filter(s => s.kind !== '학습계획')] }, old.map(s => s.localId || s.at));
+  };
+  const planWarn = (message) => { setToast(message); setTimeout(() => setToast(''), 3200); };
+  const savePlan = (event) => {
+    event.preventDefault();
+    const f = planForm;
+    const title = f.title.trim();
+    if (!title) return planWarn('이름을 적어줘');
+    if (!f.start) return planWarn('시작 날짜를 골라줘');
+    let entry;
+    if (f.kind === 'lecture') {
+      const total = Number(f.total), done = Number(f.done) || 0, perDay = Number(f.perDay);
+      if (!(total >= 1)) return planWarn('총 강의 수를 1 이상으로 넣어줘');
+      if (done < 0 || done > total) return planWarn('이미 들은 강의 수가 총 강의 수보다 클 수 없어');
+      if (f.method === 'deadline' && (!f.end || f.end < f.start)) return planWarn('목표 완강일이 시작일보다 빠를 수 없어');
+      if (f.method === 'perDay' && !(perDay >= 1)) return planWarn('하루 강의 수를 1 이상으로 넣어줘');
+      entry = { id: f.id || `plan-${Date.now()}`, kind: 'lecture', subject: f.subject, title, total, done, method: f.method, start: f.start, end: f.method === 'deadline' ? f.end : '', perDay: f.method === 'perDay' ? perDay : 0 };
+    } else {
+      const minutes = Number(f.minutes);
+      if (!(minutes >= 10)) return planWarn('하루 공부 시간을 10분 이상으로 넣어줘');
+      if (!f.end || f.end < f.start) return planWarn('종료일이 시작일보다 빠를 수 없어');
+      if (!f.weekdays.length) return planWarn('공부할 요일을 하나 이상 골라줘');
+      entry = { id: f.id || `plan-${Date.now()}`, kind: 'time', subject: f.subject, title, minutes, start: f.start, end: f.end, weekdays: f.weekdays };
+    }
+    commitPlans(f.id ? planItems.map(p => p.id === entry.id ? entry : p) : [...planItems, entry]);
+    setModal('');
+    planWarn(f.id ? '학습 계획을 수정했어요' : '학습 계획을 추가했어요');
+  };
+  const deletePlan = (plan) => { commitPlans(planItems.filter(p => p.id !== plan.id)); };
+  const openPlanForm = (kind, plan) => {
+    setPlanForm(plan
+      ? { id: plan.id, kind: plan.kind, subject: plan.subject, title: plan.title, total: String(plan.total || ''), done: String(plan.done ?? 0), method: plan.method || 'deadline', start: plan.start, end: plan.end || '', perDay: String(plan.perDay || 2), minutes: String(plan.minutes || 120), weekdays: plan.weekdays || [0, 1, 2, 3, 4, 5, 6] }
+      : { id: '', kind, subject: '국어', title: '', total: '', done: '0', method: 'deadline', start: '2026-12-09', end: '', perDay: '2', minutes: '120', weekdays: [0, 1, 2, 3, 4, 5, 6] });
+    setModal('plan');
+  };
   const removeSession = (at) => { const removed = data.sessions.find((s) => s.at === at); const courses = removed?.courseId ? data.courses.map(c => c.id === removed.courseId ? { ...c, completed: Math.max(0, c.completed - 1) } : c) : data.courses; save({ ...data, courses, sessions: data.sessions.filter((s) => s.at !== at) }, removed ? [removed.localId || removed.at] : []); };
   const menu = [{ label: '홈', icon: Home }, { label: '오늘의 시간표', icon: CalendarDays }, { label: '일정', icon: CalendarDays }, { label: '공부 기록', icon: Clock3 }, { label: '학습 통계 및 진도', icon: ChartNoAxesColumn }, { label: '설정', icon: Settings2 }];
   return <div className="app-shell">
@@ -900,13 +1137,13 @@ function App() {
 <section className="welcome"><div><div className="eyebrow">{new Intl.DateTimeFormat('en-US',{weekday:'long',month:'long',day:'numeric'}).format(new Date()).toUpperCase()} · MY STUDY PLAN</div><h1>오늘도 한 걸음,<br/><em>합격에 가까워지고 있어요.</em></h1><p>꾸준히 쌓는 오늘의 공부가 내일의 실력이 됩니다.</p></div><div className="welcome-stamp"><span>2027</span><b>합격을 향해</b><small>{nearest?`${nearest.short||nearest.name} ${ddayLabel(nearest.date)}`:'ONE DAY AT A TIME'}</small></div></section>
 <section className="stat-grid"><div className="stat-card primary-stat"><div className="stat-head"><span>오늘 순공부</span><Clock3 size={17}/></div><div className="stat-value">{(todayMinutes/60).toFixed(todayMinutes%60?1:0)}<small>시간</small></div><div className="stat-foot"><span className="green-chip">목표 {fmtHours(dayTarget(new Date(),lecturePlan))}시간</span><span>{Math.min(Math.round(todayMinutes/Math.max(dayTarget(new Date(),lecturePlan)*60,1)*100),100)}% 달성</span></div><div className="progress"><i style={{width:`${Math.min(todayMinutes/Math.max(dayTarget(new Date(),lecturePlan)*60,1)*100,100)}%`}}/></div></div><div className="stat-card"><div className="stat-head"><span>이번 주 순공부</span><Target size={17}/></div><div className="stat-value">{(weekMinutes/60).toFixed(weekMinutes%60?1:0)}<small>시간</small><b className="of-total">/ {fmtHours(weekTargetHours)}시간</b></div><div className="stat-foot"><span>목표까지</span><b>{fmt(Math.max(weekTargetMinutes-weekMinutes,0))}</b></div><div className="progress"><i className="blue-fill" style={{width:`${Math.min(weekTargetMinutes?weekMinutes/weekTargetMinutes*100:0,100)}%`}}/></div></div><div className="stat-card"><div className="stat-head"><span>이번 주 기록</span><BookOpen size={17}/></div><div className="stat-value">{weekSessions.length}<small>회</small></div><div className="stat-foot"><span>가장 많이 공부한 과목</span><b>{topSubject(weekSessions)}</b></div></div></section>
 <div className="shift-notice"><BriefcaseBusiness size={16}/><span><b>11월 근무 일정</b> · 12일·13일 20:00–24:00 추가 근무 · 20일 16:00–20:00</span></div>
-<details className="panel home-progress-panel" open><summary className="panel-heading"><div><div className="eyebrow">SUBJECT BALANCE</div><h2>과목별 학습 현황</h2></div></summary><div className="subject-list">{data.courses.map((course,i)=>{const pct=Math.round(course.completed/course.total*100);return <div className="subject-row" key={course.id}><span className={`subject-icon color-${i}`}>{course.subject==='영어'?'A':course.subject.slice(0,1)}</span><b>{course.subject}</b><div className="subject-bar"><i style={{width:`${pct}%`}}/></div><small>{course.completed}/{course.total}강</small></div>})}</div></details>
+<details className="panel home-progress-panel" open><summary className="panel-heading"><div><div className="eyebrow">SUBJECT BALANCE</div><h2>과목별 학습 현황</h2></div></summary><div className="subject-list">{allCourses.map((course,i)=>{const pct=Math.round(course.completed/course.total*100);return <div className="subject-row" key={course.id}><span className={`subject-icon color-${i}`}>{course.subject==='영어'?'A':course.subject.slice(0,1)}</span><b>{course.subject}</b><div className="subject-bar"><i style={{width:`${pct}%`}}/></div><small>{course.completed}/{course.total}강</small></div>})}</div></details>
 <section className="home-shortcuts"><button className="panel" onClick={()=>setTab('오늘의 시간표')}><CalendarDays size={20}/><b>오늘의 시간표</b><small>{todayPlan?.goal||0}강 배정 · 강의별 번호와 완료 체크</small></button><button className="panel" onClick={()=>setTab('일정')}><CalendarDays size={20}/><b>일정</b><small>주간 일정과 기본이론 완강 일정</small></button><button className="panel" onClick={()=>setTab('공부 기록')}><Clock3 size={20}/><b>공부 기록</b><small>공부 시간, 미완료·추가 공부 기록</small></button><button className="panel" onClick={()=>setTab('학습 통계 및 진도')}><ChartNoAxesColumn size={20}/><b>학습 통계 및 진도</b><small>{courseCompleted}/{courseTotal}강 완료</small></button></section>
 </>}
 {tab === '오늘의 시간표' && <>
 <div className="page-title"><div className="eyebrow">TODAY'S TIMETABLE</div><h1>오늘의 시간표</h1><p>실제 수강할 과목과 강의 번호를 확인하고, 완료하면 바로 체크해줘.</p></div>
 <section className="panel today-timetable-panel"><div className="panel-heading"><div><div className="eyebrow">TODAY'S PLAN</div><h2>시간대별 일정</h2></div><span className="record-count">{todayPlan?.goal||0}강 계획</span></div><div className="schedule-list">{todaySchedule(new Date(),lecturePlan).map((item,i)=><div className={`schedule-row ${item.type}`} key={i}><div className="time-col">{item.time}</div><div className="timeline"><i/></div><div className="schedule-info"><div className="schedule-title">{item.title}</div><small>{item.sub}</small></div>{item.type==='work'?<BriefcaseBusiness size={16}/>:item.type==='study'?<span className="subject-pill">{item.subject}</span>:<Coffee size={16}/>}</div>)}</div></section>
-<section className="panel today-lecture-check-panel"><div className="panel-heading"><div><div className="eyebrow">TODAY'S STUDY</div><h2>오늘 해야 할 학습</h2></div><span className="record-count">{todayStudyDone}/{todayStudyTotal} 완료</span></div><div className="daily-goal-progress"><i style={{width:`${todayStudyTotal?todayStudyDone/todayStudyTotal*100:0}%`}}/></div><p className="daily-goal-help">완료를 누르면 실제 진도와 공부 기록에 바로 반영되고, 완료한 항목을 다시 누르면 취소돼. 못 한 학습은 내일 일정을 바꾸지 않고 공부 기록의 미완료 공부에 쌓여.</p><div className="daily-goal-list">{wordPlanMinutes>0&&<button type="button" className={`daily-goal-item ${todayWordsDone?'done':''}`} onClick={todayWordsDone?undoWords:completeWords}><span className="daily-goal-check">{todayWordsDone&&<Check size={15}/>}</span><span><b>영어 · 영단어 암기</b><small>{fmtMinutes(wordPlanMinutes)}{todayActualWords>0&&!todayWordsDone?` · ${fmtMinutes(todayActualWords)} 기록됨`:''}</small></span></button>}{todayGoalLectureTasks.map(task=>{const checked=isLectureDone(task.course.id,task.lectureNumber);return <button type="button" className={`daily-goal-item ${checked?'done':''}`} key={task.key} onClick={()=>{const course=data.courses.find(c=>c.id===task.course.id);checked?undoLecture(course,task.lectureNumber):completeLecture(course,task.lectureNumber)}}><span className="daily-goal-check">{checked&&<Check size={15}/>}</span><span><b>{task.course.subject} · {task.lectureNumber}강</b><small>{task.course.title.replace(/^\[\d+\]\s*/, '')}</small></span></button>})}</div></section>
+<section className="panel today-lecture-check-panel"><div className="panel-heading"><div><div className="eyebrow">TODAY'S STUDY</div><h2>오늘 해야 할 학습</h2></div><span className="record-count">{todayStudyDone}/{todayStudyTotal} 완료</span></div><div className="daily-goal-progress"><i style={{width:`${todayStudyTotal?todayStudyDone/todayStudyTotal*100:0}%`}}/></div><p className="daily-goal-help">완료를 누르면 실제 진도와 공부 기록에 바로 반영되고, 완료한 항목을 다시 누르면 취소돼. 못 한 학습은 내일 일정을 바꾸지 않고 공부 기록의 미완료 공부에 쌓여.</p><div className="daily-goal-list">{wordPlanMinutes>0&&<button type="button" className={`daily-goal-item ${todayWordsDone?'done':''}`} onClick={todayWordsDone?undoWords:completeWords}><span className="daily-goal-check">{todayWordsDone&&<Check size={15}/>}</span><span><b>영어 · 영단어 암기</b><small>{fmtMinutes(wordPlanMinutes)}{todayActualWords>0&&!todayWordsDone?` · ${fmtMinutes(todayActualWords)} 기록됨`:''}</small></span></button>}{todayGoalLectureTasks.map(task=>{const checked=isLectureDone(task.course.id,task.lectureNumber);return <button type="button" className={`daily-goal-item ${checked?'done':''}`} key={task.key} onClick={()=>{const course=allCourses.find(c=>c.id===task.course.id);checked?undoLecture(course,task.lectureNumber):completeLecture(course,task.lectureNumber)}}><span className="daily-goal-check">{checked&&<Check size={15}/>}</span><span><b>{task.course.subject} · {task.lectureNumber}강</b><small>{task.course.title.replace(/^\[\d+\]\s*/, '')}</small></span></button>})}{todayTimeBlocks.map(block=>{const recorded=blockRecorded(block);const done=recorded>=block.minutes;return <button type="button" className={`daily-goal-item ${done?'done':''}`} key={block.id} onClick={()=>done?undoTimeBlock(block):completeTimeBlock(block)}><span className="daily-goal-check">{done&&<Check size={15}/>}</span><span><b>{block.subject} · {block.title}</b><small>{fmtMinutes(block.minutes)}{recorded>0&&!done?` · ${fmtMinutes(recorded)} 기록됨`:''}</small></span></button>})}</div></section>
 </>}
 {tab === '일정' && <>
 <div className="page-title"><div className="eyebrow">SCHEDULE</div><h1>일정</h1><p>이번 주 일정과 강의 번호, 기본이론 완강 일정을 한눈에 확인해.</p></div>
@@ -915,17 +1152,17 @@ function App() {
 <div className="week-switch"><button className="icon-button" onClick={()=>setWeekShift(weekShift-1)}><ChevronLeft size={18}/></button><b>{new Intl.DateTimeFormat('ko-KR',{month:'long',day:'numeric'}).format(weekDates[0])} – {new Intl.DateTimeFormat('ko-KR',{month:'long',day:'numeric'}).format(weekDates[6])}</b><button className="icon-button" onClick={()=>setWeekShift(weekShift+1)}><ChevronRight size={18}/></button><button className="today-button" onClick={()=>setWeekShift(0)}>이번 주</button></div><section className="weekly-agenda-grid">{weekDates.map((d,i)=>{const date=dateKey(d);const goal=dayTarget(d,lecturePlan);const mins=weekSessions.filter(item=>item.date===date).reduce((sum,item)=>sum+Number(item.minutes),0);const items=todaySchedule(d,lecturePlan);const planDay=lecturePlan.find(day=>dateKey(day.date)===date);const brief=planDay?planDay.tasks.map(({course,lectureNumbers})=>`${course.subject} ${lectureNumbers.length>1?`${lectureNumbers[0]}–${lectureNumbers[lectureNumbers.length-1]}`:lectureNumbers[0]}강`).join(" · "):"";return <details className="panel weekly-day-card" key={date} open={date===todayKey()}><summary className="weekly-day-header"><div><div className="weekly-day-title"><b>{weekdays[i]} {d.getDate()}일</b>{date===todayKey()&&<i>오늘</i>}</div><small>{brief||`${items.filter(item=>item.type==='study').length}개 학습 블록`}</small></div><strong>{fmtHours(goal)}<small>시간</small></strong></summary><div className="weekly-day-progress"><i style={{width:`${Math.min(goal?mins/(goal*60)*100:0,100)}%`}}/></div><div className="weekly-agenda-list">{items.map((item,index)=><div className={`weekly-agenda-row ${item.type}`} key={`${item.time}-${index}`}><time>{item.time}</time><div><b>{item.title}</b><small>{item.sub}</small></div></div>)}</div></details>})}</section>
 <details className="panel lecture-plan-panel compact-lecture-plan"><summary className="lecture-plan-summary"><div className="lecture-plan-head"><div><div className="eyebrow">NOV 11 – DEC 8</div><h2>기본이론 완강 일정</h2><p>남은 {courseTotal-courseCompleted}강 · 종료일은 12월 8일로 유지하고, 계획은 날짜대로 진행되고, 못 들은 강의는 미완료 목록에 남아.</p></div><span className="lecture-plan-total">근무 일정 반영</span></div></summary><div className="lecture-plan-list">{lecturePlan.map(day=>{const key=dateKey(day.date);return <article className="lecture-plan-day" key={key}><div className="lecture-plan-date"><b>{new Intl.DateTimeFormat('ko-KR',{month:'numeric',day:'numeric',weekday:'short'}).format(day.date)}</b><span>{day.goal}강 <i>· 단어 {fmtMinutes(day.wordMinutes)}</i></span></div><div className="lecture-plan-tasks">{day.tasks.map(({course,count})=><span key={course.id}><b>{course.subject}</b>{course.title.replace(/^\[\d+\]\s*/, '')} · {count}강</span>)}</div>{key<todayKey()&&<div className="lecture-plan-status missed"><b>실제 {day.actualLectures}강 완료</b><span>{day.absorbed?'못 들은 강의는 다시 만든 일정에 포함됐어':`미완료 ${day.missedLectures}강`} · 단어 {fmtMinutes(day.missedWordMinutes)}</span></div>}{key===todayKey()&&<div className="lecture-plan-status"><b>실제 {day.actualLectures}/{day.goal}강 · {fmt(day.actualMinutes)}</b><span>오늘 남은 강의 {todayUnfinishedLectures}강</span></div>}{key>todayKey()&&day.recoveryLectures>0&&<div className="lecture-plan-status recovery">미완료 강의 보충 +{day.recoveryLectures}강</div>}{key>todayKey()&&day.wordRecoveryMinutes>0&&<div className="lecture-plan-status recovery">단어 미완료 {day.wordRecoveryMinutes}분 보충</div>}{(specialEvents[key]||[]).map(e=><div className="lecture-plan-work" key={e.id}><BriefcaseBusiness size={14}/>{e.title} {e.allDay?'하루 종일':`${e.start}–${e.end}`}</div>)}{(day.date.getDay()>=1&&day.date.getDay()<=3)&&<div className="lecture-plan-work"><BriefcaseBusiness size={14}/>편의점 근무 20:00–24:00</div>}</article>})}</div><p className="lecture-plan-note">11월 11일 목표는 영어 2강·행정학 1강이야. 11월 12일부터 날짜별 배정량대로 진행하고(미완료분은 다음 날로 밀지 않아), 매일 단어 1시간을 포함해. 11월 12·13일은 20:00–24:00 근무를 반영했어. 12월 9–10일 예비군은 완강 일정 종료 이후라 배정하지 않아.</p></details>
 </>}
-{tab === '공부 기록' && <><div className="page-title page-title-row"><div><div className="eyebrow">STUDY LOG</div><h1>공부 기록</h1><p>강의 시청과 복습·문제풀이 시간을 구분해 기록해요.</p></div><button className="primary-button" onClick={()=>setModal('session')}><Plus size={17}/> 기록 추가</button></div><section className="panel study-plan-status"><div><span>오늘 계획</span><b>{todayPlan?.goal ?? 0}강 · 단어 {fmtMinutes(todayPlan?.wordMinutes ?? 0)}</b></div><div><span>실제 완료</span><b>{todayActualLectures}강 · {fmt(todayMinutes)}</b></div><p>미완료 {todayUnfinishedLectures}강 · {fmt(todayUnfinishedMinutes)} 은 내일로 밀리지 않고, 아래 미완료 공부 목록에 쌓여.</p></section><section className="panel catchup-panel"><div className="panel-heading"><div><div className="eyebrow">CATCH-UP LIST</div><h2>미완료 공부</h2></div><span className="record-count">{studyBacklog.pending.length}개 남음</span></div><p className="catchup-intro">하루가 지나면 못한 강의와 영단어가 여기에 쌓여. 실제로 보충한 뒤 완료 기록을 눌러 체크해줘.</p>{studyBacklog.pending.length?<div className="catchup-list">{studyBacklog.pending.map(item=><article className="catchup-item" key={item.id}><div className={`catchup-icon ${item.type}`}>{item.type==='lecture'?<BookOpen size={17}/>:<Clock3 size={17}/>}</div><div className="catchup-copy"><b>{item.title}</b><span>{new Intl.DateTimeFormat('ko-KR',{month:'numeric',day:'numeric',weekday:'short'}).format(item.date)} · {item.type==='lecture'?`${item.number}강 · 약 1시간`:`단어 ${fmtMinutes(item.minutes)}`}</span></div><button className="catchup-complete" onClick={()=>recordCatchup(item)}>보충 완료</button></article>)}</div>:<div className="catchup-empty"><Check size={17}/><span>밀린 공부가 없어. 오늘 계획을 이어가자!</span></div>}{studyBacklog.done.length>0&&<details className="catchup-history"><summary>완료한 보충 {studyBacklog.done.length}건 보기</summary><div className="catchup-list">{studyBacklog.done.slice().reverse().map(item=><article className="catchup-item done" key={item.id}><div className="catchup-icon"><Check size={16}/></div><div className="catchup-copy"><b>{item.title}</b><span>{new Intl.DateTimeFormat('ko-KR',{month:'numeric',day:'numeric'}).format(item.date)} 미완료 · {new Intl.DateTimeFormat('ko-KR',{month:'numeric',day:'numeric'}).format(new Date(item.completedDate+'T00:00:00'))} 보충 완료</span></div><Check size={17}/></article>)}</div></details>}</section><section className="panel daily-goals-panel"><div className="panel-heading"><div><div className="eyebrow">EXTRA STUDY</div><h2>추가 공부 기록</h2></div><button className="primary-button" onClick={()=>setModal('session')}><Plus size={17}/> 추가 공부 기록하기</button></div><p className="daily-goal-help">계획 밖에서 공부한 내용을 과목과 학습 종류별로 기록해. 인강 시청을 고르면 강의 번호까지 진도에 반영돼서, 미리 들은 강의는 이후 일정에서 빠져. 계획 강의나 미완료 보충은 여기 말고 아래 기록 목록에 바로 남아.</p>{extraSessionsToday.length?<div className="record-list full-record-list">{extraSessionsToday.map(s=><RecordRow key={s.at} item={s} onDelete={removeSession}/>)}</div>:<div className="catchup-empty"><Check size={17}/><span>오늘 추가로 기록한 공부가 아직 없어.</span></div>}<label className="daily-goal-note">메모<textarea value={goalNote} onChange={event=>setGoalNote(event.target.value)} placeholder="미흡한 부분, 보충학습, 내일로 넘길 내용 등을 적어줘."/></label><button className="export-button daily-goal-save" type="button" disabled={!goalNote.trim()} onClick={saveDailyGoalNote}>메모 저장</button>{savedMemos.length>0&&<div className="memo-list"><div className="eyebrow">저장한 메모</div>{savedMemos.map(memo=><div className="memo-item" key={memo.key}><div><small>{new Intl.DateTimeFormat('ko-KR',{month:'numeric',day:'numeric'}).format(new Date(memo.date+'T00:00:00'))}</small><p>{memo.text}</p></div><button className="delete-button" aria-label="메모 삭제" onClick={()=>deleteMemo(memo)}><X size={15}/></button></div>)}</div>}</section><div className="week-switch"><button className="icon-button" onClick={()=>setWeekShift(weekShift-1)}><ChevronLeft size={18}/></button><b>{new Intl.DateTimeFormat('ko-KR',{month:'long',day:'numeric'}).format(weekDates[0])} – {new Intl.DateTimeFormat('ko-KR',{month:'long',day:'numeric'}).format(weekDates[6])}</b><button className="icon-button" onClick={()=>setWeekShift(weekShift+1)}><ChevronRight size={18}/></button><button className="today-button" onClick={()=>setWeekShift(0)}>이번 주</button></div><div className="record-summary"><div><span>{weekShift===0?'이번 주':'선택한 주'} 순공부</span><b>{fmt(weekMinutes)}</b></div><div><span>기록 횟수</span><b>{weekSessions.length}회</b></div><div><span>{weekShift===0?'이번 주':'선택한 주'} 목표</span><b>{fmtHours(weekTargetHours)}시간</b></div></div><div className="panel logs-panel"><div className="panel-heading"><div><div className="eyebrow">{weekShift===0?'THIS WEEK':'SELECTED WEEK'}</div><h2>기록 목록</h2></div><span className="record-count">{weekSessions.length}개 기록</span></div>{weekSessions.length ? <div className="record-list full-record-list">{weekSessions.map(s=><RecordRow key={s.at} item={s} onDelete={removeSession}/>)}</div>:<div className="empty-state"><div className="empty-icon"><BookOpen size={20}/></div><b>아직 기록이 없어요</b><span>첫 공부 기록을 추가해 보세요.</span></div>}</div></>}
-      {tab === '학습 통계 및 진도' && <><div className="page-title page-title-row"><div><div className="eyebrow">LECTURE TRACKER</div><h1>인강 진도</h1><p>기본이론 4개 과정만 한 달 일정에 넣었어. 강의 1개는 약 1시간으로 계산해.</p></div><div className="lecture-total"><b>{courseCompleted}<small> / {courseTotal}강</small></b><span>{courseTotal-courseCompleted}강 남음 · 약 {courseTotal-courseCompleted}시간</span></div></div><div className="course-subject-tabs"><span>기본이론 {data.courses.length}개</span><span>남은 수강 시간 약 {courseTotal-courseCompleted}시간</span></div>{subjects.filter(s=>data.courses.some(c=>c.subject===s)).map((subject,index)=>{const subjectCourses=data.courses.filter(c=>c.subject===subject);const subjectCompleted=subjectCourses.reduce((sum,c)=>sum+Number(c.completed),0);const subjectTotal=subjectCourses.reduce((sum,c)=>sum+Number(c.total),0);const subjectPct=subjectTotal?Math.round(subjectCompleted/subjectTotal*100):0;return <section className="panel course-group" key={subject}><div className="course-group-head"><span className={`subject-icon color-${subjects.indexOf(subject)}`}>{['영어','국어','행정법','행정학','한국사'].indexOf(subject)===0?'A':subject.slice(0,1)}</span><div className="course-group-summary"><div><b>{subject}</b><small>{subjectCompleted} / {subjectTotal}강 수강</small><div className="course-group-progress"><i style={{width:`${subjectPct}%`}}/></div></div><strong>{subjectPct}%</strong></div></div>{subjectCourses.map(course=>{const pct=Math.round(course.completed/course.total*100);return <div className="course-row" key={course.id}><div className="course-info"><div className="course-name"><b>{course.title}</b>{course.completed===course.total&&<span className="complete-tag">완강</span>}</div><div className="course-progress"><i style={{width:`${pct}%`}}/></div></div><div className="course-count"><b>{course.total}강</b><small>{course.completed}강 수강</small></div><div className="course-actions"><button className="lecture-complete" disabled={course.completed>=course.total} onClick={()=>completeLecture(course)}><Plus size={14}/> 1강 완료</button></div></div>})}</section>})}</>}
+{tab === '공부 기록' && <><div className="page-title page-title-row"><div><div className="eyebrow">STUDY LOG</div><h1>공부 기록</h1><p>강의 시청과 복습·문제풀이 시간을 구분해 기록해요.</p></div><button className="primary-button" onClick={()=>setModal('session')}><Plus size={17}/> 기록 추가</button></div><section className="panel study-plan-status"><div><span>오늘 계획</span><b>{todayPlan?.goal ?? 0}강 · 단어 {fmtMinutes(todayPlan?.wordMinutes ?? 0)}</b></div><div><span>실제 완료</span><b>{todayActualLectures}강 · {fmt(todayMinutes)}</b></div><p>미완료 {todayUnfinishedLectures}강 · {fmt(todayUnfinishedMinutes)} 은 내일로 밀리지 않고, 아래 미완료 공부 목록에 쌓여.</p></section><section className="panel catchup-panel"><div className="panel-heading"><div><div className="eyebrow">CATCH-UP LIST</div><h2>미완료 공부</h2></div><span className="record-count">{studyBacklog.pending.length}개 남음</span></div><p className="catchup-intro">하루가 지나면 못한 강의와 영단어가 여기에 쌓여. 실제로 보충한 뒤 완료 기록을 눌러 체크해줘.</p>{studyBacklog.pending.length?<div className="catchup-list">{studyBacklog.pending.map(item=><article className="catchup-item" key={item.id}><div className={`catchup-icon ${item.type}`}>{item.type==='lecture'?<BookOpen size={17}/>:<Clock3 size={17}/>}</div><div className="catchup-copy"><b>{item.title}</b><span>{new Intl.DateTimeFormat('ko-KR',{month:'numeric',day:'numeric',weekday:'short'}).format(item.date)} · {item.type==='lecture'?`${item.number}강 · 약 1시간`:item.type==='plan'?`시간 계획 ${fmtMinutes(item.minutes)}`:`단어 ${fmtMinutes(item.minutes)}`}</span></div><button className="catchup-complete" onClick={()=>recordCatchup(item)}>보충 완료</button></article>)}</div>:<div className="catchup-empty"><Check size={17}/><span>밀린 공부가 없어. 오늘 계획을 이어가자!</span></div>}{studyBacklog.done.length>0&&<details className="catchup-history"><summary>완료한 보충 {studyBacklog.done.length}건 보기</summary><div className="catchup-list">{studyBacklog.done.slice().reverse().map(item=><article className="catchup-item done" key={item.id}><div className="catchup-icon"><Check size={16}/></div><div className="catchup-copy"><b>{item.title}</b><span>{new Intl.DateTimeFormat('ko-KR',{month:'numeric',day:'numeric'}).format(item.date)} 미완료 · {new Intl.DateTimeFormat('ko-KR',{month:'numeric',day:'numeric'}).format(new Date(item.completedDate+'T00:00:00'))} 보충 완료</span></div><Check size={17}/></article>)}</div></details>}</section><section className="panel daily-goals-panel"><div className="panel-heading"><div><div className="eyebrow">EXTRA STUDY</div><h2>추가 공부 기록</h2></div><button className="primary-button" onClick={()=>setModal('session')}><Plus size={17}/> 추가 공부 기록하기</button></div><p className="daily-goal-help">계획 밖에서 공부한 내용을 과목과 학습 종류별로 기록해. 인강 시청을 고르면 강의 번호까지 진도에 반영돼서, 미리 들은 강의는 이후 일정에서 빠져. 계획 강의나 미완료 보충은 여기 말고 아래 기록 목록에 바로 남아.</p>{extraSessionsToday.length?<div className="record-list full-record-list">{extraSessionsToday.map(s=><RecordRow key={s.at} item={s} onDelete={removeSession}/>)}</div>:<div className="catchup-empty"><Check size={17}/><span>오늘 추가로 기록한 공부가 아직 없어.</span></div>}<label className="daily-goal-note">메모<textarea value={goalNote} onChange={event=>setGoalNote(event.target.value)} placeholder="미흡한 부분, 보충학습, 내일로 넘길 내용 등을 적어줘."/></label><button className="export-button daily-goal-save" type="button" disabled={!goalNote.trim()} onClick={saveDailyGoalNote}>메모 저장</button>{savedMemos.length>0&&<div className="memo-list"><div className="eyebrow">저장한 메모</div>{savedMemos.map(memo=><div className="memo-item" key={memo.key}><div><small>{new Intl.DateTimeFormat('ko-KR',{month:'numeric',day:'numeric'}).format(new Date(memo.date+'T00:00:00'))}</small><p>{memo.text}</p></div><button className="delete-button" aria-label="메모 삭제" onClick={()=>deleteMemo(memo)}><X size={15}/></button></div>)}</div>}</section><div className="week-switch"><button className="icon-button" onClick={()=>setWeekShift(weekShift-1)}><ChevronLeft size={18}/></button><b>{new Intl.DateTimeFormat('ko-KR',{month:'long',day:'numeric'}).format(weekDates[0])} – {new Intl.DateTimeFormat('ko-KR',{month:'long',day:'numeric'}).format(weekDates[6])}</b><button className="icon-button" onClick={()=>setWeekShift(weekShift+1)}><ChevronRight size={18}/></button><button className="today-button" onClick={()=>setWeekShift(0)}>이번 주</button></div><div className="record-summary"><div><span>{weekShift===0?'이번 주':'선택한 주'} 순공부</span><b>{fmt(weekMinutes)}</b></div><div><span>기록 횟수</span><b>{weekSessions.length}회</b></div><div><span>{weekShift===0?'이번 주':'선택한 주'} 목표</span><b>{fmtHours(weekTargetHours)}시간</b></div></div><div className="panel logs-panel"><div className="panel-heading"><div><div className="eyebrow">{weekShift===0?'THIS WEEK':'SELECTED WEEK'}</div><h2>기록 목록</h2></div><span className="record-count">{weekSessions.length}개 기록</span></div>{weekSessions.length ? <div className="record-list full-record-list">{weekSessions.map(s=><RecordRow key={s.at} item={s} onDelete={removeSession}/>)}</div>:<div className="empty-state"><div className="empty-icon"><BookOpen size={20}/></div><b>아직 기록이 없어요</b><span>첫 공부 기록을 추가해 보세요.</span></div>}</div></>}
+      {tab === '학습 통계 및 진도' && <><div className="page-title page-title-row"><div><div className="eyebrow">LECTURE TRACKER</div><h1>인강 진도</h1><p>기본이론 4개 과정만 한 달 일정에 넣었어. 강의 1개는 약 1시간으로 계산해.</p></div><div className="lecture-total"><b>{courseCompleted}<small> / {courseTotal}강</small></b><span>{courseTotal-courseCompleted}강 남음 · 약 {courseTotal-courseCompleted}시간</span></div></div><div className="course-subject-tabs"><span>강의 {allCourses.length}개</span><span>남은 수강 시간 약 {courseTotal-courseCompleted}시간</span></div>{subjects.filter(s=>allCourses.some(c=>c.subject===s)).map((subject,index)=>{const subjectCourses=allCourses.filter(c=>c.subject===subject);const subjectCompleted=subjectCourses.reduce((sum,c)=>sum+Number(c.completed),0);const subjectTotal=subjectCourses.reduce((sum,c)=>sum+Number(c.total),0);const subjectPct=subjectTotal?Math.round(subjectCompleted/subjectTotal*100):0;return <section className="panel course-group" key={subject}><div className="course-group-head"><span className={`subject-icon color-${subjects.indexOf(subject)}`}>{['영어','국어','행정법','행정학','한국사'].indexOf(subject)===0?'A':subject.slice(0,1)}</span><div className="course-group-summary"><div><b>{subject}</b><small>{subjectCompleted} / {subjectTotal}강 수강</small><div className="course-group-progress"><i style={{width:`${subjectPct}%`}}/></div></div><strong>{subjectPct}%</strong></div></div>{subjectCourses.map(course=>{const pct=Math.round(course.completed/course.total*100);return <div className="course-row" key={course.id}><div className="course-info"><div className="course-name"><b>{course.title}</b>{course.completed===course.total&&<span className="complete-tag">완강</span>}</div><div className="course-progress"><i style={{width:`${pct}%`}}/></div></div><div className="course-count"><b>{course.total}강</b><small>{course.completed}강 수강</small></div><div className="course-actions"><button className="lecture-complete" disabled={course.completed>=course.total} onClick={()=>completeLecture(course)}><Plus size={14}/> 1강 완료</button></div></div>})}</section>})}</>}
       {tab === '학습 통계 및 진도' && <><div className="page-title"><div className="eyebrow">YOUR PROGRESS</div><h1>학습 통계</h1><p>시간보다 중요한 건 꾸준히 쌓이는 실력이에요.</p></div><div className="week-switch"><button className="icon-button" onClick={()=>setWeekShift(weekShift-1)}><ChevronLeft size={18}/></button><b>{new Intl.DateTimeFormat('ko-KR',{month:'long',day:'numeric'}).format(weekDates[0])} – {new Intl.DateTimeFormat('ko-KR',{month:'long',day:'numeric'}).format(weekDates[6])}</b><button className="icon-button" onClick={()=>setWeekShift(weekShift+1)}><ChevronRight size={18}/></button><button className="today-button" onClick={()=>setWeekShift(0)}>이번 주</button></div><div className="analytics-top"><div className="panel analytic-total"><div className="eyebrow">{weekShift===0?'THIS WEEK':'SELECTED WEEK'} STUDY TIME</div><b>{fmt(weekMinutes)}</b><span>목표 {fmtHours(weekTargetHours)}시간 중 {Math.round((weekTargetMinutes ? weekMinutes/weekTargetMinutes*100 : 0))}% 달성</span><div className="progress"><i style={{width:`${Math.min((weekTargetMinutes ? weekMinutes/weekTargetMinutes*100 : 0),100)}%`}}/></div></div><div className="panel analytic-total soft"><div className="eyebrow">STUDY SESSIONS</div><b>{weekSessions.length}<small>회</small></b><span>{weekShift===0?'이번 주':'선택한 주'} 학습 기록 횟수</span><div className="spark-bars">{weekDates.map((d,i)=>{const m=weekSessions.filter(s=>s.date===dateKey(d)).reduce((a,s)=>a+Number(s.minutes),0);return <i key={i} style={{height:`${Math.max(m/540*100,6)}%`}} title={`${weekdays[i]} ${fmt(m)}`}/>})}</div></div></div><div className="panel analytics-panel"><div className="panel-heading"><div><div className="eyebrow">BY SUBJECT</div><h2>과목별 공부 시간</h2></div></div><div className="analytics-subjects">{subjects.map((s,i)=>{const mins=weekSessions.filter(x=>x.subject===s).reduce((a,x)=>a+Number(x.minutes),0);return <div className="analytics-subject" key={s}><div><span className={`subject-icon color-${i}`}>{['A','국','법','행','한'][i]}</span><b>{s}</b><strong>{fmt(mins)}</strong></div><div className="large-bar"><i style={{width:`${Math.min(weekMinutes?mins/weekMinutes*100:0,100)}%`}}/></div></div>})}</div></div></>}
-      {tab === '설정' && <><div className="page-title"><div className="eyebrow">PREFERENCES</div><h1>설정</h1><p>나의 수험 계획과 데이터를 관리해.</p></div><section className="panel connection-panel"><div className="panel-heading"><div><div className="eyebrow">SUPABASE</div><h2>기기 간 기록 동기화</h2></div><span className={`connection-status ${syncStatus}`}>{syncStatus==='synced'?'연결됨':syncStatus==='syncing'?'동기화 중':syncStatus==='error'?'확인 필요':supabaseConfigured?'로그인 전':'설정 필요'}</span></div>{!supabaseConfigured?<div className="connection-copy"><p>Vercel 프로젝트 환경변수에 아래 두 항목을 추가하고 새 배포를 만들어줘.</p><code>VITE_SUPABASE_URL</code><code>VITE_SUPABASE_PUBLISHABLE_KEY</code><small>Supabase 프로젝트 URL과 Publishable key를 사용해. Secret 또는 service_role 키는 넣지 마.</small></div>:authUser&&authMode==='set-password'?<form className="connection-form" onSubmit={updatePassword}><p>새 비밀번호를 정해줘. 이메일 링크 인증이 완료된 계정에 적용돼.</p><label>새 비밀번호<input type="password" required minLength={8} autoComplete="new-password" value={authPassword} onChange={event=>setAuthPassword(event.target.value)}/></label><label>새 비밀번호 확인<input type="password" required minLength={8} autoComplete="new-password" value={confirmPassword} onChange={event=>setConfirmPassword(event.target.value)}/></label><button className="primary-button" type="submit" disabled={authBusy}>{authBusy?'저장 중':'비밀번호 저장'}</button></form>:authUser?<div className="connection-account"><p><b>{authUser.email}</b> 계정으로 기록을 동기화하고 있어.</p><p>현재 상태: {syncStatus==='synced'?'모든 기록이 저장됐어.':syncStatus==='syncing'?'기록을 저장하는 중이야.':syncStatus==='error'?'동기화 오류가 있어. SQL 적용과 네트워크를 확인해줘.':'연결을 준비 중이야.'}</p><button className="export-button" onClick={signOut}><LogOut size={15}/> 로그아웃</button></div>:<div className="connection-form"><p>{authMode==='signup'?'이메일과 비밀번호로 계정을 만들자. 이메일 확인이 켜져 있으면 확인 메일 링크를 눌러야 가입이 완료돼.':authMode==='reset'?'가입한 이메일을 입력하면 비밀번호 재설정 링크를 보내줄게.':'가입한 이메일과 비밀번호를 입력해 로그인해.'}</p><form onSubmit={authMode==='signup'?signUpWithPassword:authMode==='reset'?sendPasswordReset:signInWithPassword}><label>이메일 주소<input type="email" required autoComplete="email" placeholder="name@example.com" value={authEmail} onChange={event=>setAuthEmail(event.target.value)}/></label>{authMode!=='reset'&&<label>비밀번호<input type="password" required minLength={authMode==='signup'?8:1} autoComplete={authMode==='signup'?'new-password':'current-password'} value={authPassword} onChange={event=>setAuthPassword(event.target.value)}/></label>}{authMode==='signup'&&<label>비밀번호 확인<input type="password" required minLength={8} autoComplete="new-password" value={confirmPassword} onChange={event=>setConfirmPassword(event.target.value)}/></label>}<button className="primary-button" type="submit" disabled={authBusy}>{authBusy?'잠시만…':authMode==='signup'?'가입하기':authMode==='reset'?'재설정 메일 받기':'로그인'}</button></form><div className="auth-mode-links">{authMode==='login'?<><button type="button" onClick={()=>{setAuthMode('signup');setAuthMessage('');}}>새 계정 만들기</button><button type="button" onClick={()=>{setAuthMode('reset');setAuthMessage('');}}>비밀번호 잊어버렸어</button></>:<button type="button" onClick={()=>{setAuthMode('login');setAuthMessage('');}}>로그인으로 돌아가기</button>}</div></div>}{authMessage&&<p className="auth-message" role="status">{authMessage}</p>}</section><div className="panel settings-panel goal-panel"><div className="panel-heading"><div><div className="eyebrow">GOAL</div><h2>목표 설정</h2></div></div>{examList.map(exam=><div className="setting-row" key={exam.id}><div className="setting-icon"><Target size={18}/></div><div><b>{exam.name}</b><small>{exam.track?`${exam.track} · `:''}{examDateText(exam)}</small></div><span className="setting-value dday-value">{ddayLabel(exam.date)}</span><button className="export-button exam-edit" type="button" onClick={()=>openExamForm(exam)}>수정</button><button className="delete-button" type="button" aria-label="시험 삭제" onClick={()=>deleteExam(exam)}><X size={15}/></button></div>)}<div className="setting-row exam-add-row"><button className="export-button" type="button" onClick={()=>openExamForm(null)}><Plus size={15}/> 시험 추가</button></div></div><div className="panel settings-panel work-panel"><div className="panel-heading"><div><div className="eyebrow">WORK</div><h2>근무와 특별 일정</h2></div></div><div className="setting-row"><div className="setting-icon"><BriefcaseBusiness size={18}/></div><div><b>정기 근무</b><small>월–수 20:00–24:00 (편의점)</small></div></div>{eventList.map(entry=><div className="setting-row" key={entry.id}><div className="setting-icon"><CalendarDays size={18}/></div><div><b>{entry.title}</b><small>{entry.date.slice(5).replace('-','/')}({['일','월','화','수','목','금','토'][new Date(entry.date+'T00:00:00').getDay()]}) · {entry.allDay?'하루 종일':`${entry.start}–${entry.end}`}</small></div><button className="export-button exam-edit" type="button" onClick={()=>openEventForm(entry)}>수정</button><button className="delete-button" type="button" aria-label="일정 삭제" onClick={()=>deleteEvent(entry)}><X size={15}/></button></div>)}<div className="setting-row exam-add-row"><button className="export-button" type="button" onClick={()=>openEventForm(null)}><Plus size={15}/> 특별 일정 추가</button></div></div><div className="panel settings-panel"><div className="panel-heading"><div><div className="eyebrow">DATA</div><h2>내 기록</h2></div></div><p className="settings-copy">현재 기록은 이 브라우저에 자동 저장돼. 다른 기기에서도 쓰려면 Supabase 연결이 필요해.</p><button className="export-button" onClick={()=>{const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='합격기록장-백업.json';a.click();URL.revokeObjectURL(a.href);}}>기록 백업 다운로드 <ArrowRight size={15}/></button><label className="export-button import-button">백업에서 기록 불러오기<input type="file" accept="application/json,.json" hidden onChange={importBackup}/></label></div></>}
+      {tab === '설정' && <><div className="page-title"><div className="eyebrow">PREFERENCES</div><h1>설정</h1><p>나의 수험 계획과 데이터를 관리해.</p></div><section className="panel connection-panel"><div className="panel-heading"><div><div className="eyebrow">SUPABASE</div><h2>기기 간 기록 동기화</h2></div><span className={`connection-status ${syncStatus}`}>{syncStatus==='synced'?'연결됨':syncStatus==='syncing'?'동기화 중':syncStatus==='error'?'확인 필요':supabaseConfigured?'로그인 전':'설정 필요'}</span></div>{!supabaseConfigured?<div className="connection-copy"><p>Vercel 프로젝트 환경변수에 아래 두 항목을 추가하고 새 배포를 만들어줘.</p><code>VITE_SUPABASE_URL</code><code>VITE_SUPABASE_PUBLISHABLE_KEY</code><small>Supabase 프로젝트 URL과 Publishable key를 사용해. Secret 또는 service_role 키는 넣지 마.</small></div>:authUser&&authMode==='set-password'?<form className="connection-form" onSubmit={updatePassword}><p>새 비밀번호를 정해줘. 이메일 링크 인증이 완료된 계정에 적용돼.</p><label>새 비밀번호<input type="password" required minLength={8} autoComplete="new-password" value={authPassword} onChange={event=>setAuthPassword(event.target.value)}/></label><label>새 비밀번호 확인<input type="password" required minLength={8} autoComplete="new-password" value={confirmPassword} onChange={event=>setConfirmPassword(event.target.value)}/></label><button className="primary-button" type="submit" disabled={authBusy}>{authBusy?'저장 중':'비밀번호 저장'}</button></form>:authUser?<div className="connection-account"><p><b>{authUser.email}</b> 계정으로 기록을 동기화하고 있어.</p><p>현재 상태: {syncStatus==='synced'?'모든 기록이 저장됐어.':syncStatus==='syncing'?'기록을 저장하는 중이야.':syncStatus==='error'?'동기화 오류가 있어. SQL 적용과 네트워크를 확인해줘.':'연결을 준비 중이야.'}</p><button className="export-button" onClick={signOut}><LogOut size={15}/> 로그아웃</button></div>:<div className="connection-form"><p>{authMode==='signup'?'이메일과 비밀번호로 계정을 만들자. 이메일 확인이 켜져 있으면 확인 메일 링크를 눌러야 가입이 완료돼.':authMode==='reset'?'가입한 이메일을 입력하면 비밀번호 재설정 링크를 보내줄게.':'가입한 이메일과 비밀번호를 입력해 로그인해.'}</p><form onSubmit={authMode==='signup'?signUpWithPassword:authMode==='reset'?sendPasswordReset:signInWithPassword}><label>이메일 주소<input type="email" required autoComplete="email" placeholder="name@example.com" value={authEmail} onChange={event=>setAuthEmail(event.target.value)}/></label>{authMode!=='reset'&&<label>비밀번호<input type="password" required minLength={authMode==='signup'?8:1} autoComplete={authMode==='signup'?'new-password':'current-password'} value={authPassword} onChange={event=>setAuthPassword(event.target.value)}/></label>}{authMode==='signup'&&<label>비밀번호 확인<input type="password" required minLength={8} autoComplete="new-password" value={confirmPassword} onChange={event=>setConfirmPassword(event.target.value)}/></label>}<button className="primary-button" type="submit" disabled={authBusy}>{authBusy?'잠시만…':authMode==='signup'?'가입하기':authMode==='reset'?'재설정 메일 받기':'로그인'}</button></form><div className="auth-mode-links">{authMode==='login'?<><button type="button" onClick={()=>{setAuthMode('signup');setAuthMessage('');}}>새 계정 만들기</button><button type="button" onClick={()=>{setAuthMode('reset');setAuthMessage('');}}>비밀번호 잊어버렸어</button></>:<button type="button" onClick={()=>{setAuthMode('login');setAuthMessage('');}}>로그인으로 돌아가기</button>}</div></div>}{authMessage&&<p className="auth-message" role="status">{authMessage}</p>}</section><div className="panel settings-panel goal-panel"><div className="panel-heading"><div><div className="eyebrow">GOAL</div><h2>목표 설정</h2></div></div>{examList.map(exam=><div className="setting-row" key={exam.id}><div className="setting-icon"><Target size={18}/></div><div><b>{exam.name}</b><small>{exam.track?`${exam.track} · `:''}{examDateText(exam)}</small></div><span className="setting-value dday-value">{ddayLabel(exam.date)}</span><button className="export-button exam-edit" type="button" onClick={()=>openExamForm(exam)}>수정</button><button className="delete-button" type="button" aria-label="시험 삭제" onClick={()=>deleteExam(exam)}><X size={15}/></button></div>)}<div className="setting-row exam-add-row"><button className="export-button" type="button" onClick={()=>openExamForm(null)}><Plus size={15}/> 시험 추가</button></div></div><div className="panel settings-panel work-panel"><div className="panel-heading"><div><div className="eyebrow">WORK</div><h2>근무와 특별 일정</h2></div></div><div className="setting-row"><div className="setting-icon"><BriefcaseBusiness size={18}/></div><div><b>정기 근무</b><small>월–수 20:00–24:00 (편의점)</small></div></div>{eventList.map(entry=><div className="setting-row" key={entry.id}><div className="setting-icon"><CalendarDays size={18}/></div><div><b>{entry.title}</b><small>{entry.date.slice(5).replace('-','/')}({['일','월','화','수','목','금','토'][new Date(entry.date+'T00:00:00').getDay()]}) · {entry.allDay?'하루 종일':`${entry.start}–${entry.end}`}</small></div><button className="export-button exam-edit" type="button" onClick={()=>openEventForm(entry)}>수정</button><button className="delete-button" type="button" aria-label="일정 삭제" onClick={()=>deleteEvent(entry)}><X size={15}/></button></div>)}<div className="setting-row exam-add-row"><button className="export-button" type="button" onClick={()=>openEventForm(null)}><Plus size={15}/> 특별 일정 추가</button></div></div><div className="panel settings-panel plan-panel"><div className="panel-heading"><div><div className="eyebrow">STUDY PLAN</div><h2>학습 계획 추가</h2></div></div><p className="settings-copy">기본이론 말고 새로 듣는 강의(심화강의 등)나 문제풀이·복습 시간을 추가해. 추가하면 일정, 오늘의 시간표, 완강 일정에 바로 반영돼.</p>{planItems.map(plan=>{const course=plan.kind==='lecture'?allCourses.find(c=>c.id===plan.id):null;const dayNames=['일','월','화','수','목','금','토'];return <div className="setting-row" key={plan.id}><div className="setting-icon">{plan.kind==='lecture'?<BookOpen size={18}/>:<Clock3 size={18}/>}</div><div><b>{plan.title}</b><small>{plan.kind==='lecture'?`${plan.subject} · 강의 ${course?course.completed:plan.done}/${plan.total}강 · ${plan.start.slice(5).replace('-','/')}부터 ${plan.method==='perDay'?`하루 ${plan.perDay}강`:`${plan.end.slice(5).replace('-','/')} 완강`}`:`${plan.subject} · 하루 ${fmtMinutes(Number(plan.minutes))} · ${plan.start.slice(5).replace('-','/')}~${plan.end.slice(5).replace('-','/')} · ${(plan.weekdays||[]).length===7?'매일':(plan.weekdays||[]).map(n=>dayNames[n]).join('')}`}</small></div><button className="export-button exam-edit" type="button" onClick={()=>openPlanForm(plan.kind,plan)}>수정</button><button className="delete-button" type="button" aria-label="학습 계획 삭제" onClick={()=>deletePlan(plan)}><X size={15}/></button></div>})}<div className="setting-row exam-add-row"><button className="export-button" type="button" onClick={()=>openPlanForm('lecture',null)}><Plus size={15}/> 강의 추가</button><button className="export-button" type="button" onClick={()=>openPlanForm('time',null)}><Plus size={15}/> 시간 계획 추가</button></div></div><div className="panel settings-panel"><div className="panel-heading"><div><div className="eyebrow">DATA</div><h2>내 기록</h2></div></div><p className="settings-copy">현재 기록은 이 브라우저에 자동 저장돼. 다른 기기에서도 쓰려면 Supabase 연결이 필요해.</p><button className="export-button" onClick={()=>{const blob=new Blob([JSON.stringify(data,null,2)],{type:'application/json'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='합격기록장-백업.json';a.click();URL.revokeObjectURL(a.href);}}>기록 백업 다운로드 <ArrowRight size={15}/></button><label className="export-button import-button">백업에서 기록 불러오기<input type="file" accept="application/json,.json" hidden onChange={importBackup}/></label></div></>}
       </div><footer className="footer"><span>합격 기록장 <i>·</i> 하루씩 쌓는 나의 합격 기록</span><span>STAY STEADY, KEEP GOING.</span></footer></main>
       {mobileMenuOpen&&<div className="sidebar-backdrop" onMouseDown={event=>{if(event.target===event.currentTarget)setMobileMenuOpen(false)}}/>}
       <nav className="mobile-nav">{menu.map(({label,icon:Icon})=><button className={tab===label?'selected':''} key={label} onClick={()=>setTab(label)}><Icon size={19}/><small>{label}</small></button>)}</nav>
-      {(modal==='session'||modal==='trip') && <div className="modal-backdrop" onMouseDown={(e)=>{if(e.target===e.currentTarget)setModal('')}}><div className="modal"><div className="modal-head"><div><div className="eyebrow">{modal==='session'?'STUDY LOG':'WALKING ROUTE'}</div><h2>{modal==='session'?'공부 기록 추가':'이동 경로 추가'}</h2></div><button className="icon-button" onClick={()=>setModal('')}><X size={18}/></button></div>{modal==='session'?<form onSubmit={addSession}>{form.kind!=='인강 시청'&&<label>과목<select value={form.subject} onChange={e=>setForm({...form,subject:e.target.value})}>{subjects.map(s=><option key={s}>{s}</option>)}</select></label>}<label>학습 종류<select value={form.kind} onChange={e=>setForm({...form,kind:e.target.value})}><option>복습·문제풀이</option><option>인강 시청</option><option>단어 암기</option><option>모의고사</option></select></label>{form.kind==='인강 시청'&&<><label>강의 과정<select value={formCourse?.id||''} onChange={e=>setForm({...form,courseId:e.target.value,lecture:''})}>{data.courses.map(c=><option value={c.id} key={c.id}>{c.subject} · {c.title.replace(/^\[\d+\]\s*/, '')}</option>)}</select></label><label>수료한 강의<select value={formLecture||''} onChange={e=>setForm({...form,lecture:e.target.value})}>{formLectureOptions.length?formLectureOptions.map(n=><option value={n} key={n}>{n}강</option>):<option value="">모두 수료했어요</option>}</select></label></>}<label>공부 시간<select value={form.minutes} onChange={e=>setForm({...form,minutes:e.target.value})}>{[25,30,45,60,90,120,150,180].map(n=><option value={n} key={n}>{n<60?`${n}분`:`${Math.floor(n/60)}시간${n%60?` ${n%60}분`:''}`}</option>)}</select></label><label>오늘 공부한 내용 <textarea placeholder="예: 행정법 기본강의 3강, 처분성 기출 10문제" value={form.memo} onChange={e=>setForm({...form,memo:e.target.value})}/></label><button className="primary-button submit-button" type="submit"><Check size={16}/> 기록 저장</button></form>:<form onSubmit={addTrip}><label>이동 경로<input required placeholder="예: 집 → 도서관" value={tripForm.route} onChange={e=>setTripForm({...tripForm,route:e.target.value})}/></label><label>소요 시간<select value={tripForm.minutes} onChange={e=>setTripForm({...tripForm,minutes:e.target.value})}>{[2,5,9,10,12,13,15,20,25,30,40,60].map(n=><option value={n} key={n}>{n}분</option>)}</select></label><label>메모<input value={tripForm.note} onChange={e=>setTripForm({...tripForm,note:e.target.value})}/></label><button className="primary-button submit-button" type="submit"><Check size={16}/> 이동 기록 저장</button></form>}</div></div>}{modal==='exam'&&<div className="modal-backdrop" onMouseDown={(e)=>{if(e.target===e.currentTarget)setModal('')}}><div className="modal"><div className="modal-head"><div><div className="eyebrow">TARGET EXAM</div><h2>{examForm.id?'시험 수정':'시험 추가'}</h2></div><button className="icon-button" onClick={()=>setModal('')}><X size={18}/></button></div><form onSubmit={saveExam}><label>시험 이름<input required placeholder="예: 서울시 9급 공무원 시험" value={examForm.name} onChange={e=>setExamForm({...examForm,name:e.target.value})}/></label><label>직렬<input placeholder="예: 일반행정" value={examForm.track} onChange={e=>setExamForm({...examForm,track:e.target.value})}/></label><label>시험 날짜<input type="date" value={examForm.date} onChange={e=>setExamForm({...examForm,date:e.target.value})}/></label><p className="daily-goal-help">날짜를 정하지 않았다면 비워 두세요. 일정 미정으로 표시돼요.</p><button className="primary-button submit-button" type="submit"><Check size={16}/> 저장</button></form></div></div>}{replanAsk&&<div className="modal-backdrop" onMouseDown={(e)=>{if(e.target===e.currentTarget)setReplanAsk(null)}}><div className="modal"><div className="modal-head"><div><div className="eyebrow">REPLAN</div><h2>일정을 다시 만들까요?</h2></div><button className="icon-button" onClick={()=>setReplanAsk(null)}><X size={18}/></button></div><p className="daily-goal-help">{replanAsk.skipToday?'오늘은 영단어만 남기고 내일부터':'오늘부터'} 12월 8일까지, 아직 못 들은 모든 강의(미완료 포함)를 날짜별로 다시 나눠요. 알바가 있는 날(월~수 저녁, 11/20 오후)은 강의를 적게 배정하고, 지난 날짜의 미완료 강의는 새 일정에 포함돼요.</p><div className="replan-actions"><button className="primary-button" type="button" onClick={()=>performReplan(replanAsk.skipToday)}><Check size={16}/> 다시 만들기</button><button className="export-button" type="button" onClick={()=>setReplanAsk(null)}>취소</button></div></div></div>}{modal==='event'&&<div className="modal-backdrop" onMouseDown={(e)=>{if(e.target===e.currentTarget)setModal('')}}><div className="modal"><div className="modal-head"><div><div className="eyebrow">SPECIAL SCHEDULE</div><h2>{eventForm.id?'특별 일정 수정':'특별 일정 추가'}</h2></div><button className="icon-button" onClick={()=>setModal('')}><X size={18}/></button></div><form onSubmit={saveEvent}><label>이름<input placeholder="예: 편의점 추가 근무, 병원, 약속" value={eventForm.title} onChange={e=>setEventForm({...eventForm,title:e.target.value})}/></label><label>날짜<input type="date" required value={eventForm.date} onChange={e=>setEventForm({...eventForm,date:e.target.value})}/></label><label className="check-label"><input type="checkbox" checked={eventForm.allDay} onChange={e=>setEventForm({...eventForm,allDay:e.target.checked})}/> 하루 종일 (그날은 공부를 배정하지 않아요)</label>{!eventForm.allDay&&<><label>시작 시간<input type="time" required value={eventForm.start} onChange={e=>setEventForm({...eventForm,start:e.target.value})}/></label><label>종료 시간<input type="time" required value={eventForm.end} onChange={e=>setEventForm({...eventForm,end:e.target.value})}/></label></>}<p className="daily-goal-help">자정까지면 종료 시간을 00:00으로 넣어줘. 저장하면 오늘의 시간표, 일정, 완강 일정이 바로 다시 계산돼. 이른 시간에 시작하는 일정은 그 전에 들어갈 수 있는 강의만 배정해.</p><button className="primary-button submit-button" type="submit"><Check size={16}/> 저장</button></form></div></div>}{toast&&<div className="toast"><Check size={15}/>{toast}</div>}
+      {(modal==='session'||modal==='trip') && <div className="modal-backdrop" onMouseDown={(e)=>{if(e.target===e.currentTarget)setModal('')}}><div className="modal"><div className="modal-head"><div><div className="eyebrow">{modal==='session'?'STUDY LOG':'WALKING ROUTE'}</div><h2>{modal==='session'?'공부 기록 추가':'이동 경로 추가'}</h2></div><button className="icon-button" onClick={()=>setModal('')}><X size={18}/></button></div>{modal==='session'?<form onSubmit={addSession}>{form.kind!=='인강 시청'&&<label>과목<select value={form.subject} onChange={e=>setForm({...form,subject:e.target.value})}>{subjects.map(s=><option key={s}>{s}</option>)}</select></label>}<label>학습 종류<select value={form.kind} onChange={e=>setForm({...form,kind:e.target.value})}><option>복습·문제풀이</option><option>인강 시청</option><option>단어 암기</option><option>모의고사</option></select></label>{form.kind==='인강 시청'&&<><label>강의 과정<select value={formCourse?.id||''} onChange={e=>setForm({...form,courseId:e.target.value,lecture:''})}>{allCourses.map(c=><option value={c.id} key={c.id}>{c.subject} · {c.title.replace(/^\[\d+\]\s*/, '')}</option>)}</select></label><label>수료한 강의<select value={formLecture||''} onChange={e=>setForm({...form,lecture:e.target.value})}>{formLectureOptions.length?formLectureOptions.map(n=><option value={n} key={n}>{n}강</option>):<option value="">모두 수료했어요</option>}</select></label></>}<label>공부 시간<select value={form.minutes} onChange={e=>setForm({...form,minutes:e.target.value})}>{[25,30,45,60,90,120,150,180].map(n=><option value={n} key={n}>{n<60?`${n}분`:`${Math.floor(n/60)}시간${n%60?` ${n%60}분`:''}`}</option>)}</select></label><label>오늘 공부한 내용 <textarea placeholder="예: 행정법 기본강의 3강, 처분성 기출 10문제" value={form.memo} onChange={e=>setForm({...form,memo:e.target.value})}/></label><button className="primary-button submit-button" type="submit"><Check size={16}/> 기록 저장</button></form>:<form onSubmit={addTrip}><label>이동 경로<input required placeholder="예: 집 → 도서관" value={tripForm.route} onChange={e=>setTripForm({...tripForm,route:e.target.value})}/></label><label>소요 시간<select value={tripForm.minutes} onChange={e=>setTripForm({...tripForm,minutes:e.target.value})}>{[2,5,9,10,12,13,15,20,25,30,40,60].map(n=><option value={n} key={n}>{n}분</option>)}</select></label><label>메모<input value={tripForm.note} onChange={e=>setTripForm({...tripForm,note:e.target.value})}/></label><button className="primary-button submit-button" type="submit"><Check size={16}/> 이동 기록 저장</button></form>}</div></div>}{modal==='exam'&&<div className="modal-backdrop" onMouseDown={(e)=>{if(e.target===e.currentTarget)setModal('')}}><div className="modal"><div className="modal-head"><div><div className="eyebrow">TARGET EXAM</div><h2>{examForm.id?'시험 수정':'시험 추가'}</h2></div><button className="icon-button" onClick={()=>setModal('')}><X size={18}/></button></div><form onSubmit={saveExam}><label>시험 이름<input required placeholder="예: 서울시 9급 공무원 시험" value={examForm.name} onChange={e=>setExamForm({...examForm,name:e.target.value})}/></label><label>직렬<input placeholder="예: 일반행정" value={examForm.track} onChange={e=>setExamForm({...examForm,track:e.target.value})}/></label><label>시험 날짜<input type="date" value={examForm.date} onChange={e=>setExamForm({...examForm,date:e.target.value})}/></label><p className="daily-goal-help">날짜를 정하지 않았다면 비워 두세요. 일정 미정으로 표시돼요.</p><button className="primary-button submit-button" type="submit"><Check size={16}/> 저장</button></form></div></div>}{replanAsk&&<div className="modal-backdrop" onMouseDown={(e)=>{if(e.target===e.currentTarget)setReplanAsk(null)}}><div className="modal"><div className="modal-head"><div><div className="eyebrow">REPLAN</div><h2>일정을 다시 만들까요?</h2></div><button className="icon-button" onClick={()=>setReplanAsk(null)}><X size={18}/></button></div><p className="daily-goal-help">{replanAsk.skipToday?'오늘은 영단어만 남기고 내일부터':'오늘부터'} 12월 8일까지, 아직 못 들은 모든 강의(미완료 포함)를 날짜별로 다시 나눠요. 알바가 있는 날(월~수 저녁, 11/20 오후)은 강의를 적게 배정하고, 지난 날짜의 미완료 강의는 새 일정에 포함돼요.</p><div className="replan-actions"><button className="primary-button" type="button" onClick={()=>performReplan(replanAsk.skipToday)}><Check size={16}/> 다시 만들기</button><button className="export-button" type="button" onClick={()=>setReplanAsk(null)}>취소</button></div></div></div>}{modal==='event'&&<div className="modal-backdrop" onMouseDown={(e)=>{if(e.target===e.currentTarget)setModal('')}}><div className="modal"><div className="modal-head"><div><div className="eyebrow">SPECIAL SCHEDULE</div><h2>{eventForm.id?'특별 일정 수정':'특별 일정 추가'}</h2></div><button className="icon-button" onClick={()=>setModal('')}><X size={18}/></button></div><form onSubmit={saveEvent}><label>이름<input placeholder="예: 편의점 추가 근무, 병원, 약속" value={eventForm.title} onChange={e=>setEventForm({...eventForm,title:e.target.value})}/></label><label>날짜<input type="date" required value={eventForm.date} onChange={e=>setEventForm({...eventForm,date:e.target.value})}/></label><label className="check-label"><input type="checkbox" checked={eventForm.allDay} onChange={e=>setEventForm({...eventForm,allDay:e.target.checked})}/> 하루 종일 (그날은 공부를 배정하지 않아요)</label>{!eventForm.allDay&&<><label>시작 시간<input type="time" required value={eventForm.start} onChange={e=>setEventForm({...eventForm,start:e.target.value})}/></label><label>종료 시간<input type="time" required value={eventForm.end} onChange={e=>setEventForm({...eventForm,end:e.target.value})}/></label></>}<p className="daily-goal-help">자정까지면 종료 시간을 00:00으로 넣어줘. 저장하면 오늘의 시간표, 일정, 완강 일정이 바로 다시 계산돼. 이른 시간에 시작하는 일정은 그 전에 들어갈 수 있는 강의만 배정해.</p><button className="primary-button submit-button" type="submit"><Check size={16}/> 저장</button></form></div></div>}{modal==='plan'&&<div className="modal-backdrop" onMouseDown={(e)=>{if(e.target===e.currentTarget)setModal('')}}><div className="modal"><div className="modal-head"><div><div className="eyebrow">STUDY PLAN</div><h2>{planForm.id?'학습 계획 수정':planForm.kind==='lecture'?'강의 추가':'시간 계획 추가'}</h2></div><button className="icon-button" onClick={()=>setModal('')}><X size={18}/></button></div><form onSubmit={savePlan}><label>과목<select value={planForm.subject} onChange={e=>setPlanForm({...planForm,subject:e.target.value})}>{subjects.map(s=><option key={s}>{s}</option>)}</select></label><label>이름<input required placeholder={planForm.kind==='lecture'?'예: 국어 심화강의':'예: 행정법 기출 문제풀이'} value={planForm.title} onChange={e=>setPlanForm({...planForm,title:e.target.value})}/></label>{planForm.kind==='lecture'?<><label>총 강의 수<input type="number" min="1" required value={planForm.total} onChange={e=>setPlanForm({...planForm,total:e.target.value})}/></label><label>이미 들은 강의 수<input type="number" min="0" value={planForm.done} onChange={e=>setPlanForm({...planForm,done:e.target.value})}/></label><label>시작 날짜<input type="date" required value={planForm.start} onChange={e=>setPlanForm({...planForm,start:e.target.value})}/></label><label>일정 방식<select value={planForm.method} onChange={e=>setPlanForm({...planForm,method:e.target.value})}><option value="deadline">완강 목표일로 정하기</option><option value="perDay">하루 N강으로 정하기</option></select></label>{planForm.method==='deadline'?<label>목표 완강일<input type="date" required value={planForm.end} onChange={e=>setPlanForm({...planForm,end:e.target.value})}/></label>:<label>하루에 듣는 강의 수<input type="number" min="1" required value={planForm.perDay} onChange={e=>setPlanForm({...planForm,perDay:e.target.value})}/></label>}</>:<><label>하루 공부 시간(분)<input type="number" min="10" step="10" required value={planForm.minutes} onChange={e=>setPlanForm({...planForm,minutes:e.target.value})}/></label><label>시작 날짜<input type="date" required value={planForm.start} onChange={e=>setPlanForm({...planForm,start:e.target.value})}/></label><label>종료 날짜<input type="date" required value={planForm.end} onChange={e=>setPlanForm({...planForm,end:e.target.value})}/></label><div className="weekday-picks">공부할 요일{['일','월','화','수','목','금','토'].map((name,n)=><label className="check-label" key={name}><input type="checkbox" checked={planForm.weekdays.includes(n)} onChange={e=>setPlanForm({...planForm,weekdays:e.target.checked?[...planForm.weekdays,n].sort():planForm.weekdays.filter(x=>x!==n)})}/>{name}</label>)}</div></>}<p className="daily-goal-help">{planForm.kind==='lecture'?'기본이론이 끝나는 12월 8일 이후로 시작하면 기본이론 일정은 그대로 두고 이어서 배정해. 저장하면 일정이 바로 다시 계산돼.':'정한 요일마다 강의 뒤에 이 시간이 시간표에 들어가. 못 한 시간은 미완료 공부에 쌓여.'}</p><button className="primary-button submit-button" type="submit"><Check size={16}/> 저장</button></form></div></div>}{toast&&<div className="toast"><Check size={15}/>{toast}</div>}
     </div>
 }
-function dayTarget(d, lecturePlan){const key=dateKey(d);if(isNoStudyDay(key))return 0;const planned=lecturePlan.find(day=>dateKey(day.date)===key);if(planned)return planned.goal+planned.wordMinutes/60;if(key>='2026-11-11'&&key<=lecturePlanEnd)return 1;return baseHours[(d.getDay()+6)%7]}
+function dayTarget(d, lecturePlan){const key=dateKey(d);if(isNoStudyDay(key))return 0;const planned=lecturePlan.find(day=>dateKey(day.date)===key);if(planned)return planned.goal+planned.wordMinutes/60+(planned.timeMinutes||0)/60;if(key>='2026-11-11'&&key<=lecturePlanEnd)return 1;return baseHours[(d.getDay()+6)%7]}
 function topSubject(sessions){if(!sessions.length)return '—';return subjects.map(s=>[s,sessions.filter(x=>x.subject===s).reduce((a,x)=>a+Number(x.minutes),0)]).sort((a,b)=>b[1]-a[1])[0][0]}
 function legacyTodaySchedule(d){const day=(d.getDay()+6)%7;const schedule=day>=3?[['기본이론 강의 · 복습','집중 학습 · 3시간','행정법','13:15–16:15','study']]:[['영어 단어 암기','매일 루틴 · 1시간','영어','09:15–10:15','study'],['기본이론 강의','집중 학습','국어 · 행정법 · 행정학','10:30–12:30','study']];return schedule.map(([title,sub,subject,time,type])=>({title,sub,subject,time,type})).concat(day<3?[{title:'편의점 근무',sub:'정기 근무',time:'20:00–24:00',type:'work'}]:[])}
 function todaySchedule(d, lecturePlan){
@@ -960,6 +1197,12 @@ function todaySchedule(d, lecturePlan){
         else add('휴식','다음 강의 전 잠깐 쉬어가기','',20,'break');
       }
     }
+  });
+  (planned.timeBlocks||[]).forEach(block=>{
+    // Lunch also goes in front of a time block when it is the first break from 10:50 on.
+    if(!lunchAdded&&cursor>=650){add('점심 및 휴식','식사와 재충전','',60,'break');lunchAdded=true;}
+    else add('휴식','다음 학습 전 잠깐 쉬어가기','',20,'break');
+    add(block.title,'시간 계획',block.subject,block.minutes);
   });
   dayEvents.forEach(e=>schedule.push({title:e.title,sub:'특별 일정',time:`${e.start}–${e.end}`,type:'work'}));
   if([1,2,3].includes(d.getDay()))schedule.push({title:'편의점 근무',sub:'정기 근무',time:'20:00–24:00',type:'work'});
