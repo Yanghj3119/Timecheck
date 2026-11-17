@@ -934,10 +934,10 @@ function todaySchedule(d, lecturePlan){
   const dayEvents=specialEvents[key]||[];
   if(dayEvents.some(e=>e.allDay))return dayEvents.map(e=>({title:e.title,sub:e.allDay?'하루 종일 · 학습 배정 없음':'특별 일정',time:e.allDay?'종일':`${e.start}–${e.end}`,type:'work'}));
   if(!planned)return legacyTodaySchedule(d);
-  let cursor=key==='2026-11-20'?360:420;
-  const schedule=[];
   const showTime=value=>`${String(Math.floor(value/60)%24).padStart(2,'0')}:${String(value%60).padStart(2,'0')}`;
   const busy=dayEvents.map(e=>[toMinutes(e.start),toMinutes(e.end)]).sort((a,b)=>a[0]-b[0]);
+  let cursor=key==='2026-11-20'?360:420;
+  const schedule=[];
   const add=(title,sub,subject,duration,type='study')=>{for(const [from,to] of busy){if(cursor<to&&cursor+duration>from)cursor=to;}schedule.push({title,sub,subject,time:`${showTime(cursor)}–${showTime(cursor+duration)}`,type,tag:title.startsWith('영단어')?'매일':''});cursor+=duration;};
   add('영단어 암기',`${key<'2026-11-11'?'교재 도착 전 · 기본 단어 복습':'교재 도착 후 · 신규 단어와 누적 복습'}${planned.wordRecoveryMinutes?` · 미완료 ${planned.wordRecoveryMinutes}분 보충`:''}`,'영어',planned.wordMinutes);
   if(planned.tasks.length)add('짧은 휴식','눈과 몸을 쉬어줘','',30,'break');
@@ -945,20 +945,22 @@ function todaySchedule(d, lecturePlan){
   planned.tasks.forEach(({course,count,lectureNumbers=[]})=>{
     let remaining=count,lectureIndex=0;
     while(remaining>0){
-      const chunk=Math.min(2,remaining);
+      let chunk=Math.min(2,remaining);
+      // A two-lecture block that runs across noon is split, so the lunch break can start near 12:00.
+      if(!lunchAdded&&chunk===2&&cursor<720&&cursor+120>720&&Math.abs(cursor+60-720)<Math.abs(cursor+120-720))chunk=1;
       const title=course.title.replace(/^\[\d+\]\s*/, '').replace(' 기본이론','');
       const chunkNumbers=lectureNumbers.slice(lectureIndex,lectureIndex+chunk);
-       add(`${course.subject} 기본이론`,`${title} · ${chunkNumbers.length?`${chunkNumbers[0]}–${chunkNumbers[chunkNumbers.length-1]}강`:`${chunk}강`} 시청`,course.subject,chunk*60);
-       lectureIndex+=chunk;
+      add(`${course.subject} 기본이론`,`${title} · ${chunkNumbers.length?`${chunkNumbers[0]}–${chunkNumbers[chunkNumbers.length-1]}강`:`${chunk}강`} 시청`,course.subject,chunk*60);
+      lectureIndex+=chunk;
       lectureHours+=chunk;
       remaining-=chunk;
       if(lectureHours<planned.goal){
-        if(!lunchAdded&&lectureHours>=Math.ceil(planned.goal/2)){add('점심 및 휴식','식사와 재충전','',60,'break');lunchAdded=true;}
+        // Lunch is the first break that starts at 10:50 or later: that is the one closest to 12:00.
+        if(!lunchAdded&&cursor>=650){add('점심 및 휴식','식사와 재충전','',60,'break');lunchAdded=true;}
         else add('휴식','다음 강의 전 잠깐 쉬어가기','',20,'break');
       }
     }
   });
-
   dayEvents.forEach(e=>schedule.push({title:e.title,sub:'특별 일정',time:`${e.start}–${e.end}`,type:'work'}));
   if([1,2,3].includes(d.getDay()))schedule.push({title:'편의점 근무',sub:'정기 근무',time:'20:00–24:00',type:'work'});
   return schedule.sort((a,b)=>a.time.localeCompare(b.time));
