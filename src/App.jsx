@@ -87,6 +87,8 @@ function quotasByWeight(total, weights, caps = []) {
 }
 const TRAVEL_MINUTES = 15;          // default travel time to and from a shift or an appointment
 const STUDY_DAY_END = 22 * 60 + 30; // nothing is scheduled after 22:30
+const BREAK_MINUTES = 10;           // break between two study blocks (lunch stays 60 minutes)
+const LECTURE_START = 8 * 60;       // online lectures start at 08:00
 const REGULAR_SHIFT = { title: '편의점 근무', from: 20 * 60, to: 24 * 60 };
 const showClock = (value) => `${String(Math.floor(value / 60) % 24).padStart(2, '0')}:${String(value % 60).padStart(2, '0')}`;
 
@@ -106,7 +108,7 @@ const dayBusy = (date) => {
 function layoutDay({ date, wordMinutes, wordSub, tasks, timeBlocks }) {
   const key = dateKey(date);
   const busy = dayBusy(date).map(b => [b.from - b.travel, Math.min(1440, b.to) + b.travel]);
-  let cursor = key === '2026-11-20' ? 360 : 420;
+  let cursor = 420; // the day starts at 07:00 with the words
   const rows = [];
   let lunchAdded = false, started = false, unplacedLectures = 0, unplacedBlocks = 0;
   const slot = (duration) => {
@@ -118,15 +120,19 @@ function layoutDay({ date, wordMinutes, wordSub, tasks, timeBlocks }) {
   // A study block, with the break in front of it when it is not the first one of the day.
   const placeStudy = (title, sub, subject, duration, breakTitle) => {
     const markRows = rows.length, markCursor = cursor, markLunch = lunchAdded;
-    if (started) {
-      const lunch = breakTitle === 'normal' && !lunchAdded && cursor >= 650 && cursor <= 900;
-      const length = breakTitle === 'short' ? 30 : lunch ? 60 : 20;
+    if (started && breakTitle !== 'none') {
+      // Lunch is the break closest to 12:00: the next break is at least about 70 minutes away, so
+      // from 11:30 on this one is nearer to noon.
+      const lunch = !lunchAdded && cursor >= 690 && cursor <= 900;
+      const length = lunch ? 60 : BREAK_MINUTES;
       if (slot(length) === cursor) {
-        push(cursor, lunch ? '점심 및 휴식' : breakTitle === 'short' ? '짧은 휴식' : '휴식', lunch ? '식사와 재충전' : breakTitle === 'short' ? '눈과 몸을 쉬어줘' : '다음 강의 전 잠깐 쉬어가기', '', length, 'break');
+        push(cursor, lunch ? '점심 및 휴식' : '휴식', lunch ? '식사와 재충전' : '다음 강의 전 잠깐 쉬어가기', '', length, 'break');
         cursor += length;
         if (lunch) lunchAdded = true;
       }
     }
+    // Lectures never start before 08:00; the first one follows the words right away, without a break.
+    if (breakTitle === 'none' && title !== '영단어 암기') cursor = Math.max(cursor, LECTURE_START);
     let start = slot(duration);
     // A break that would end up in front of a shift is dropped (the block jumps behind the shift anyway).
     if (rows.length > markRows && start > cursor) { rows.length = markRows; cursor = markCursor; lunchAdded = markLunch; start = slot(duration); }
@@ -146,10 +152,10 @@ function layoutDay({ date, wordMinutes, wordSub, tasks, timeBlocks }) {
       if (!lunchAdded && chunk === 2 && cursor < 720 && cursor + 120 > 720 && Math.abs(cursor + 60 - 720) < Math.abs(cursor + 120 - 720)) chunk = 1;
       const title = String(course.title || '').replace(/^\[\d+\]\s*/, '').replace(' 기본이론', '');
       // Does a block (with its break) fit right now, without being pushed behind a shift?
-      const fitsNow = (duration) => started ? (slot(20 + duration) === cursor && cursor + 20 + duration <= STUDY_DAY_END) : (slot(duration) === cursor && cursor + duration <= STUDY_DAY_END);
+      const fitsNow = (duration) => (started && !firstAfterWords) ? (slot(BREAK_MINUTES + duration) === cursor && cursor + BREAK_MINUTES + duration <= STUDY_DAY_END) : (slot(duration) === cursor && cursor + duration <= STUDY_DAY_END);
       if (chunk === 2 && !fitsNow(120) && fitsNow(60)) chunk = 1;
       const label = (n) => { const numbers = lectureNumbers.slice(index, index + n); return numbers.length > 1 ? `${numbers[0]}–${numbers[numbers.length - 1]}강` : numbers.length === 1 ? `${numbers[0]}강` : `${n}강`; };
-      const breakKind = firstAfterWords ? 'short' : 'normal';
+      const breakKind = firstAfterWords ? 'none' : 'normal';
       let placed = placeStudy(`${course.subject} 기본이론`, `${title} · ${label(chunk)} 시청`, course.subject, chunk * 60, breakKind);
       if (!placed && chunk === 2) { chunk = 1; placed = placeStudy(`${course.subject} 기본이론`, `${title} · ${label(1)} 시청`, course.subject, 60, breakKind); }
       if (!placed) { unplacedLectures += remaining; failed = true; break; }
@@ -159,7 +165,7 @@ function layoutDay({ date, wordMinutes, wordSub, tasks, timeBlocks }) {
     }
   });
   (timeBlocks || []).forEach(block => {
-    if (!placeStudy(block.title, '시간 계획', block.subject, block.minutes, firstAfterWords ? 'short' : 'normal')) unplacedBlocks++;
+    if (!placeStudy(block.title, '시간 계획', block.subject, block.minutes, firstAfterWords ? 'none' : 'normal')) unplacedBlocks++;
     else firstAfterWords = false;
   });
   return { rows, unplacedLectures, unplacedBlocks };
@@ -199,7 +205,7 @@ const lectureDayWeight = (date) => {
   if ([1, 2, 3].includes(date.getDay())) weights.push(0.7);
   (specialEvents[key] || []).forEach(e => {
     const start = toMinutes(e.start);
-    weights.push(start >= 22 * 60 ? 1 : start >= 20 * 60 ? 0.7 : Math.max(0, Math.floor((start - 550) / 80)) / 10);
+    weights.push(start >= 22 * 60 ? 1 : start >= 20 * 60 ? 0.7 : Math.max(0, Math.floor((start - 555) / 65)) / 12);
   });
   return weights.length ? Math.min(...weights) : 1;
 };
