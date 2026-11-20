@@ -379,3 +379,6 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .plan-panel .setting-icon{background:#f0edfa;color:#7d6cc0}
 .plan-panel .exam-add-row{gap:8px;flex-wrap:wrap}
 .weekday-picks{display:flex;flex-wrap:wrap;align-items:center;gap:6px 12px;font-size:13px;margin:4px 0 8px}
+/* 일정 경고와 시간표 경고 줄 */
+.plan-warning{margin:0 0 14px;padding:12px 14px;border:1px solid #e8c9a0;background:#fff6e8;border-radius:12px;color:#8a5a14;font-size:13px;line-height:1.5}
+.schedule-row.warn .schedule-title{color:#b4491f}
