@@ -70,10 +70,11 @@ const isNoStudyDay = (key) => noStudyDates.has(key) || (specialEvents[key] || []
 // caps[i] (optional) is a hard maximum for day i; what does not fit goes to the other days.
 function quotasByWeight(total, weights, caps = []) {
   const quotas = weights.map(() => 0);
-  let open = weights.map((_, i) => i).filter(i => weights[i] > 0);
+  let open = weights.map((_, i) => i).filter(i => weights[i] > 0 && (caps[i] == null || caps[i] > 0));
   let left = total;
   while (open.length) {
     const sum = open.reduce((a, i) => a + weights[i], 0);
+    if (!(sum > 0)) break;
     const raw = open.map(i => left * weights[i] / sum);
     const shares = raw.map(Math.floor);
     let rest = left - shares.reduce((a, q) => a + q, 0);
@@ -226,7 +227,19 @@ function allocateLectureDays(courses, remaining, dates, weightFn = null, capFn =
     flexibleIndex++;
     return quota;
   });
-  if (weightFn) quotas = quotasByWeight(total, dates.map(weightFn), dates.map(date => (capFn ? capFn(date) : null)));
+  if (weightFn) {
+    // Keep the explicitly lighter 6-lecture target on 11/20, then distribute
+    // the remaining lectures over the other available days by usable capacity.
+    const fixedIndex = dates.findIndex(date => dateKey(date) === '2026-11-20');
+    const fixedCap = fixedIndex >= 0 && capFn ? capFn(dates[fixedIndex]) : null;
+    const fixedQuota = fixedIndex >= 0
+      ? Math.min(6, total, fixedCap == null ? 6 : Math.max(0, fixedCap))
+      : 0;
+    const flexibleWeights = dates.map((date, i) => i === fixedIndex ? 0 : weightFn(date));
+    const flexibleCaps = dates.map((date, i) => i === fixedIndex ? 0 : (capFn ? capFn(date) : null));
+    quotas = quotasByWeight(Math.max(0, total - fixedQuota), flexibleWeights, flexibleCaps);
+    if (fixedIndex >= 0) quotas[fixedIndex] = fixedQuota;
+  }
   const assigned = courses.map(() => 0);
   let slot = 0;
   const result = dates.map((date, dayIndex) => {
@@ -895,20 +908,21 @@ function App() {
     return () => { active = false; clearInterval(timer); window.removeEventListener('focus', pull); document.removeEventListener('visibilitychange', pull); window.removeEventListener('online', pull); };
   }, [authUser?.id, syncReady]);
 
-  // The plan end date moved to 12/12, so every account rebuilds its schedule from today once.
+  // Version 3: rebuild once from the user's actual remaining lecture progress through 12/13.
+  // This is a one-time replan: missed lectures are included in this new fixed plan, but after
+  // the replan they stay in the catch-up list and are not pushed forward day by day.
   const rebuiltOnce = useRef(false);
   useEffect(() => {
     if (rebuiltOnce.current || !authChecked) return;
     if (supabase && authUser && !syncReady) return;
     rebuiltOnce.current = true;
     const current = dataRef.current;
-    if (current.sessions.some(s => s.kind === '계획' && /"v":2/.test(String(s.memo)))) return;
-    if (!current.sessions.some(s => !isPseudoSession(s))) return;
+    if (current.sessions.some(s => s.kind === '계획' && /"v":3/.test(String(s.memo)))) return;
     const at = new Date().toISOString();
-    const session = { subject: '계획', kind: '계획', minutes: 1, memo: JSON.stringify({ date: todayKey(), from: todayKey(), at, v: 2 }), date: todayKey(), at };
+    const session = { subject: '계획', kind: '계획', minutes: 1, memo: JSON.stringify({ date: todayKey(), from: todayKey(), at, v: 3 }), date: todayKey(), at };
     const old = current.sessions.filter(s => s.kind === '계획');
     save({ ...current, sessions: [session, ...current.sessions.filter(s => s.kind !== '계획')] }, old.map(s => s.localId || s.at));
-    setToast('종료일이 12월 13일로 바뀌어서 오늘 기준으로 일정을 다시 짰어요');
+    setToast('현재 남은 강의를 기준으로 12월 13일까지 일정을 다시 배분했어요');
     setTimeout(() => setToast(''), 6000);
   }, [authChecked, authUser?.id, syncReady]);
 
