@@ -318,7 +318,12 @@ const isPseudoSession = (session) => session.kind === '메모' || session.kind =
 // "Replan from what is left": the newest 계획 record says from which day, and at which
 // moment, the remaining lectures were spread again over the days up to the end date.
 const latestRebase = (sessions) => sessions.filter(s => s.kind === '계획').map(s => {
-  try { const value = JSON.parse(s.memo); return value && value.date && value.at ? { date: value.date, from: value.from || value.date, at: value.at, atMs: Date.parse(value.at) || 0 } : null; } catch { return null; }
+  try {
+    const value = JSON.parse(s.memo);
+    return value && value.date && value.at
+      ? { date: value.date, from: value.from || value.date, at: value.at, atMs: Date.parse(value.at) || 0, manual: value.manual === true, v: Number(value.v) || 0 }
+      : null;
+  } catch { return null; }
 }).filter(Boolean).sort((a, b) => b.atMs - a.atMs)[0] || null;
 // Study plans added in the app (stored as 1-minute placeholder records of kind '학습계획'):
 //  - { kind: 'lecture', id, subject, title, total, done, method: 'deadline' | 'perDay', start, end, perDay }
@@ -895,20 +900,23 @@ function App() {
     return () => { active = false; clearInterval(timer); window.removeEventListener('focus', pull); document.removeEventListener('visibilitychange', pull); window.removeEventListener('online', pull); };
   }, [authUser?.id, syncReady]);
 
-  // The plan end date moved to 12/12, so every account rebuilds its schedule from today once.
+  // One-time migration for old plans. Never overwrite a user's explicit replan:
+  // current versions carry manual:true; older "today is vocabulary only" replans
+  // are recognized by their from date being later than the record date.
   const rebuiltOnce = useRef(false);
   useEffect(() => {
     if (rebuiltOnce.current || !authChecked) return;
     if (supabase && authUser && !syncReady) return;
     rebuiltOnce.current = true;
     const current = dataRef.current;
-    if (current.sessions.some(s => s.kind === '계획' && /"v":2/.test(String(s.memo)))) return;
+    const existingRebase = latestRebase(current.sessions);
+    if (existingRebase && (existingRebase.manual || existingRebase.v >= 2 || existingRebase.from > existingRebase.date)) return;
     if (!current.sessions.some(s => !isPseudoSession(s))) return;
     const at = new Date().toISOString();
-    const session = { subject: '계획', kind: '계획', minutes: 1, memo: JSON.stringify({ date: todayKey(), from: todayKey(), at, v: 2 }), date: todayKey(), at };
+    const session = { subject: '계획', kind: '계획', minutes: 1, memo: JSON.stringify({ date: todayKey(), from: todayKey(), at, v: 2, manual: false }), date: todayKey(), at };
     const old = current.sessions.filter(s => s.kind === '계획');
     save({ ...current, sessions: [session, ...current.sessions.filter(s => s.kind !== '계획')] }, old.map(s => s.localId || s.at));
-    setToast('종료일이 12월 13일로 바뀌어서 오늘 기준으로 일정을 다시 짰어요');
+    setToast('종료일 변경에 따라 기존 계획을 한 번 갱신했어요');
     setTimeout(() => setToast(''), 6000);
   }, [authChecked, authUser?.id, syncReady]);
 
@@ -1202,7 +1210,7 @@ function App() {
     setReplanAsk(null);
     const from = skipToday ? dateKey(studyDate(1)) : todayKey();
     const at = new Date().toISOString();
-    const session = { subject: '계획', kind: '계획', minutes: 1, memo: JSON.stringify({ date: todayKey(), from, at }), date: todayKey(), at };
+    const session = { subject: '계획', kind: '계획', minutes: 1, memo: JSON.stringify({ date: todayKey(), from, at, v: 2, manual: true }), date: todayKey(), at };
     const old = data.sessions.filter(s => s.kind === '계획');
     save({ ...data, sessions: [session, ...data.sessions.filter(s => s.kind !== '계획')] }, old.map(s => s.localId || s.at));
     setToast(`남은 양을 기준으로 일정을 다시 만들었어요 (${skipToday ? '내일' : '오늘'}부터 12월 13일까지)`);
