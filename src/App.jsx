@@ -56,7 +56,8 @@ const defaultEvents = [
   { id: 'ev-1113', date: '2026-11-13', title: '편의점 추가 근무', start: '20:00', end: '24:00' },
   { id: 'ev-1114', date: '2026-11-14', title: '편의점 추가 근무', start: '20:00', end: '24:00' },
   { id: 'ev-1120', date: '2026-11-20', title: '편의점 추가 근무', start: '16:00', end: '20:00' },
-  { id: 'ev-1128', date: '2026-11-28', title: '편의점 추가 근무', start: '12:00', end: '20:00' },
+  { id: 'ev-1128-am', date: '2026-11-28', title: '편의점 추가 근무', start: '08:00', end: '12:00', travel: 15 },
+  { id: 'ev-1128', date: '2026-11-28', title: '편의점 추가 근무', start: '12:00', end: '20:00', travel: 15 },
   { id: 'ev-1129', date: '2026-11-29', title: '편의점 추가 근무', start: '15:00', end: '20:00' },
 ];
 const eventsToMap = (list) => list.filter(e => e.date && (e.allDay || (e.start && e.end))).reduce((map, e) => { (map[e.date] ||= []).push(e); return map; }, {});
@@ -86,11 +87,11 @@ function quotasByWeight(total, weights, caps = []) {
   return quotas;
 }
 const TRAVEL_MINUTES = 15;          // default travel time to and from a shift or an appointment
-const STUDY_DAY_END = 22 * 60 + 30; // nothing is scheduled after 22:30
+const STUDY_DAY_END = 24 * 60; // study may continue until midnight (24:00)
 const BREAK_MINUTES = 10;           // break between two study blocks (lunch stays 60 minutes)
 const LECTURE_START = 8 * 60;       // online lectures start at 08:00
 const REGULAR_SHIFT = { title: '편의점 근무', from: 20 * 60, to: 24 * 60 };
-const showClock = (value) => `${String(Math.floor(value / 60) % 24).padStart(2, '0')}:${String(value % 60).padStart(2, '0')}`;
+const showClock = (value) => value === 24 * 60 ? '24:00' : `${String(Math.floor(value / 60) % 24).padStart(2, '0')}:${String(value % 60).padStart(2, '0')}`;
 
 // Work shifts and appointments of a day with their travel time (minutes since midnight).
 const dayBusy = (date) => {
@@ -100,7 +101,19 @@ const dayBusy = (date) => {
     travel: e.travel !== undefined && e.travel !== '' && e.travel !== null ? Number(e.travel) : TRAVEL_MINUTES,
   }));
   if ([1, 2, 3].includes(date.getDay())) list.push({ title: REGULAR_SHIFT.title, sub: '정기 근무', from: REGULAR_SHIFT.from, to: REGULAR_SHIFT.to, travel: TRAVEL_MINUTES });
-  return list.sort((x, y) => x.from - y.from);
+  // Merge adjacent/overlapping work intervals before adding commute buffers. This prevents
+  // travel for the first segment from being inserted inside the next segment's work time.
+  return list.sort((x, y) => x.from - y.from).reduce((merged, item) => {
+    const previous = merged[merged.length - 1];
+    if (previous && item.from <= previous.to) {
+      previous.to = Math.max(previous.to, item.to);
+      previous.travel = Math.max(previous.travel, item.travel);
+      const titles = new Set([...(previous.title.split(' · ')), item.title]);
+      previous.title = titles.size === 1 ? [...titles][0] : [...titles].some(title => title.includes('편의점')) ? '편의점 근무' : '연속 일정';
+      previous.sub = previous.sub === item.sub ? previous.sub : '연속 근무 및 특별 일정';
+    } else merged.push({ ...item });
+    return merged;
+  }, []);
 };
 
 // Lays out one day: words, lectures and time plans are put only into the free time, never into a
