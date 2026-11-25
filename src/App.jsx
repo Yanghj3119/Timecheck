@@ -465,7 +465,9 @@ function buildCorePlan(courses, sessions = [], today = new Date(), dates = makeP
       const limit = limits.get(dateKey(date));
       return limit === undefined ? base : Math.min(base === null ? Infinity : base, limit);
     };
-    let allocated = allocateLectureDays(courses, counts, rebaseDates, lectureDayWeight, capWithLimits);
+    // The daily cap already includes shifts, travel, vocabulary, breaks, lunch and time plans.
+    // Use that real capacity as the allocation weight too, instead of penalizing work days twice.
+    let allocated = allocateLectureDays(courses, counts, rebaseDates, capWithLimits, capWithLimits);
     for (let attempt = 0; attempt < 8; attempt++) {
       let changed = false;
       allocated.forEach(day => {
@@ -475,7 +477,7 @@ function buildCorePlan(courses, sessions = [], today = new Date(), dates = makeP
         if (out.unplacedLectures > 0) { limits.set(dateKey(day.date), Math.max(0, day.goal - out.unplacedLectures)); changed = true; }
       });
       if (!changed) break;
-      allocated = allocateLectureDays(courses, counts, rebaseDates, lectureDayWeight, capWithLimits);
+      allocated = allocateLectureDays(courses, counts, rebaseDates, capWithLimits, capWithLimits);
     }
     lastCoreShortfall = allocated.shortfall || 0;
     const pointer = new Map(courses.map(course => [course.id, 0]));
